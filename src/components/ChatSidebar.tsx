@@ -91,53 +91,90 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
     }, []);
 
     const fetchContacts = useCallback(async () => {
-        // Fetch both messages and contacts in parallel so names are always available
-        const [msgsResult, ebpResult] = await Promise.all([
-            supabase.from('whatsappbuongo').select('*').order('created_at', { ascending: false }),
+        // ------------------------------------------------------------------
+        // FIX: Supabase (PostgREST) silently caps `.select('*')` at 1 000 rows.
+        // The old code did a single unfiltered fetch, so contacts whose messages
+        // were all beyond row 1 000 never appeared in the sidebar.
+        //
+        // We now paginate in chunks of 1 000 until the server returns fewer rows
+        // than requested, which means we've reached the end.
+        // Only the columns needed for the sidebar are fetched to keep payloads small.
+        // ------------------------------------------------------------------
+        const PAGE_SIZE = 1000;
+
+        const fetchAllMessages = async (): Promise<WhatsAppMessage[]> => {
+            const allMessages: WhatsAppMessage[] = [];
+            let from = 0;
+            let keepGoing = true;
+
+            while (keepGoing) {
+                const { data, error } = await supabase
+                    .from('whatsappbuongo')
+                    .select('id, from, to, text, type, created_at')
+                    .order('created_at', { ascending: false })
+                    .range(from, from + PAGE_SIZE - 1);
+
+                if (error) {
+                    console.error('[Sidebar] pagination error:', error);
+                    break;
+                }
+
+                if (data && data.length > 0) {
+                    allMessages.push(...(data as WhatsAppMessage[]));
+                }
+
+                // If we got fewer rows than the page size, we've fetched everything
+                keepGoing = (data?.length ?? 0) === PAGE_SIZE;
+                from += PAGE_SIZE;
+            }
+
+            return allMessages;
+        };
+
+        // Fetch messages (paginated) and contacts in parallel
+        const [msgs, ebpResult] = await Promise.all([
+            fetchAllMessages(),
             supabase.from('contacts.buongo').select('*'),
         ]);
 
-        if (msgsResult.data) {
-            // Build a fresh contacts lookup from the inline fetch
-            const ebpMap = new Map<string, ContactEbp>();
-            if (ebpResult.data) {
-                (ebpResult.data as ContactEbp[]).forEach(c => ebpMap.set(String(c.id), c));
-                setContactsMap(ebpMap);
-            }
-
-            const msgs = msgsResult.data as WhatsAppMessage[];
-            const contactMap = new Map<string, SidebarContact>();
-
-            msgs.forEach((msg) => {
-                const contactId = getContactId(msg);
-                if (!contactId) return;
-
-                const isIncoming = msg.from && /^\d+$/.test(msg.from);
-                const isRead = readMessages.has(msg.id);
-                const ebpContact = ebpMap.get(contactId);
-
-                if (!contactMap.has(contactId)) {
-                    contactMap.set(contactId, {
-                        id: contactId,
-                        name: ebpContact?.name_WA || null,
-                        lastMessage: msg.text || (msg.type === 'audio' ? '🎤 Voice message' : '📷 Media'),
-                        lastMessageTime: msg.created_at,
-                        unreadCount: isIncoming && !isRead ? 1 : 0,
-                        tags: ebpContact?.tags || [],
-                        aiEnabled: ebpContact?.AI_replies === 'true',
-                    });
-                } else if (isIncoming && !isRead) {
-                    const existing = contactMap.get(contactId)!;
-                    existing.unreadCount++;
-                }
-            });
-
-            const sortedContacts = Array.from(contactMap.values()).sort(
-                (a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()
-            );
-
-            setContacts(sortedContacts);
+        // Build a fresh contacts lookup from the inline fetch
+        const ebpMap = new Map<string, ContactEbp>();
+        if (ebpResult.data) {
+            (ebpResult.data as ContactEbp[]).forEach(c => ebpMap.set(String(c.id), c));
+            setContactsMap(ebpMap);
         }
+
+        const contactMap = new Map<string, SidebarContact>();
+
+        msgs.forEach((msg) => {
+            const contactId = getContactId(msg);
+            if (!contactId) return;
+
+            const isIncoming = msg.from && /^\d+$/.test(msg.from);
+            const isRead = readMessages.has(msg.id);
+            const ebpContact = ebpMap.get(contactId);
+
+            if (!contactMap.has(contactId)) {
+                contactMap.set(contactId, {
+                    id: contactId,
+                    name: ebpContact?.name_WA || null,
+                    lastMessage: msg.text || (msg.type === 'audio' ? '🎤 Voice message' : '📷 Media'),
+                    lastMessageTime: msg.created_at,
+                    unreadCount: isIncoming && !isRead ? 1 : 0,
+                    tags: ebpContact?.tags || [],
+                    aiEnabled: ebpContact?.AI_replies === 'true',
+                });
+            } else if (isIncoming && !isRead) {
+                const existing = contactMap.get(contactId)!;
+                existing.unreadCount++;
+            }
+        });
+
+        const sortedContacts = Array.from(contactMap.values()).sort(
+            (a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()
+        );
+
+        setContacts(sortedContacts);
         setLoading(false);
     }, [readMessages]);
 
