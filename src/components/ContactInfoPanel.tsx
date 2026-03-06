@@ -108,7 +108,7 @@ export const ContactInfoPanel = ({ contactId, isOpen, onClose }: ContactInfoPane
             <div className="w-full sm:w-[380px] max-h-[85vh] bg-white rounded-t-3xl sm:rounded-3xl border border-slate-200 flex flex-col shadow-2xl modal-panel overflow-hidden" onClick={e => e.stopPropagation()}>
 
                 {/* Header with avatar */}
-                <div className="relative bg-gradient-to-br from-red-500 to-red-600 px-6 pt-8 pb-6 text-center">
+                <div className="relative px-6 pt-8 pb-6 text-center" style={{ background: 'linear-gradient(135deg, var(--color-primary), color-mix(in srgb, var(--color-primary) 70%, black))' }}>
                     <button onClick={onClose} className="absolute top-4 right-4 p-1.5 rounded-full bg-white/20 text-white hover:bg-white/30 transition-colors">
                         <X size={16} />
                     </button>
@@ -154,14 +154,14 @@ export const ContactInfoPanel = ({ contactId, isOpen, onClose }: ContactInfoPane
                     <div className="grid grid-cols-2 gap-3">
                         <div className="bg-slate-50 rounded-xl p-3">
                             <div className="flex items-center gap-2 mb-1">
-                                <MessageSquare size={14} className="text-red-500" />
+                                <MessageSquare size={14} style={{ color: 'var(--color-accent)' }} />
                                 <span className="text-slate-500 text-xs">Messages</span>
                             </div>
                             <p className="text-slate-900 font-bold text-lg">{messageCount}</p>
                         </div>
-                        <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-100">
+                        <div className="p-3 rounded-2xl border border-slate-100 bg-slate-50">
                             <div className="flex items-center gap-2 mb-1">
-                                <span className="text-emerald-500"><Calendar size={14} /></span>
+                                <span style={{ color: 'var(--color-primary)' }}><Calendar size={14} /></span>
                                 <span className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Last Activity</span>
                             </div>
                             <p className="text-slate-900 font-bold text-sm truncate">+{contactId}</p>
@@ -172,7 +172,7 @@ export const ContactInfoPanel = ({ contactId, isOpen, onClose }: ContactInfoPane
                     <div className="space-y-2">
                         <div className="flex items-center justify-between bg-slate-50 rounded-xl p-3">
                             <div className="flex items-center gap-2">
-                                <Calendar size={14} className="text-green-500" />
+                                <Calendar size={14} style={{ color: 'var(--color-primary)' }} />
                                 <span className="text-slate-500 text-xs">First message</span>
                             </div>
                             <span className="text-slate-900 text-xs font-medium">{formatDate(firstMessageDate)}</span>

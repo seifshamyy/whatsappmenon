@@ -148,7 +148,8 @@ export const TagManager = ({ isOpen, onClose, onTagsChanged, contactId, contactT
                                         <button
                                             onClick={() => updateTag(tag.id)}
                                             disabled={loading}
-                                            className="px-4 py-2 bg-red-500 text-white rounded-xl text-xs font-bold shadow-sm"
+                                            className="px-4 py-2 text-white rounded-xl text-xs font-bold shadow-sm"
+                                            style={{ backgroundColor: 'var(--color-accent)' }}
                                         >
                                             Save Changes
                                         </button>
@@ -170,10 +171,13 @@ export const TagManager = ({ isOpen, onClose, onTagsChanged, contactId, contactT
                                             disabled={loading}
                                             className="flex items-center gap-3 flex-1 text-left group"
                                         >
-                                            <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all flex-shrink-0 ${localContactTags.includes(tag.id)
-                                                ? 'border-red-500 bg-red-500'
-                                                : 'border-slate-300 bg-white group-hover:border-red-400'
-                                                }`}>
+                                            <div
+                                                className="w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all flex-shrink-0"
+                                                style={localContactTags.includes(tag.id) ? {
+                                                    borderColor: 'var(--color-accent)',
+                                                    backgroundColor: 'var(--color-accent)',
+                                                } : undefined}
+                                            >
                                                 {localContactTags.includes(tag.id) && <Check size={14} className="text-white" />}
                                             </div>
                                             <div
@@ -190,10 +194,10 @@ export const TagManager = ({ isOpen, onClose, onTagsChanged, contactId, contactT
                                                 style={{ backgroundColor: tag['tag hex'] || '#64748b' }}
                                             />
                                             <span className="flex-1 text-slate-700 font-bold text-sm">{tag['tag name'] || 'Unnamed'}</span>
-                                            <button onClick={() => startEdit(tag)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-500 transition-colors">
+                                            <button onClick={() => startEdit(tag)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-[var(--color-accent)] transition-colors">
                                                 <Edit2 size={16} />
                                             </button>
-                                            <button onClick={() => deleteTag(tag.id)} className="p-2 hover:bg-red-50 rounded-lg text-slate-400 hover:text-red-600 transition-colors">
+                                            <button onClick={() => deleteTag(tag.id)} className="p-2 rounded-lg text-slate-400 hover:text-[var(--color-accent)] transition-colors">
                                                 <Trash2 size={16} />
                                             </button>
                                         </>
@@ -212,11 +216,11 @@ export const TagManager = ({ isOpen, onClose, onTagsChanged, contactId, contactT
 
                     {/* Create form */}
                     {creating && (
-                        <div className="p-4 bg-red-50/50 rounded-2xl border border-red-100 space-y-3 animate-in zoom-in-95 duration-200">
+                        <div className="p-4 rounded-2xl border space-y-3 animate-in zoom-in-95 duration-200" style={{ backgroundColor: 'color-mix(in srgb, var(--color-accent) 6%, white)', borderColor: 'color-mix(in srgb, var(--color-accent) 15%, white)' }}>
                             <input
                                 value={tagName}
                                 onChange={e => setTagName(e.target.value)}
-                                className="w-full bg-white border border-red-200 rounded-xl px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500/50 shadow-sm"
+                                className="w-full bg-white border rounded-xl px-3 py-2 text-sm text-slate-900 focus:outline-none shadow-sm border-slate-200"
                                 placeholder="Enter tag name..."
                                 autoFocus
                             />
@@ -238,7 +242,8 @@ export const TagManager = ({ isOpen, onClose, onTagsChanged, contactId, contactT
                                 <button
                                     onClick={createTag}
                                     disabled={loading || !tagName.trim()}
-                                    className="px-6 py-2 bg-red-500 text-white rounded-xl text-xs font-bold shadow-md hover:bg-red-600 transition-colors disabled:opacity-50"
+                                    className="px-6 py-2 text-white rounded-xl text-xs font-bold shadow-md transition-colors disabled:opacity-50"
+                                    style={{ backgroundColor: 'var(--color-accent)' }}
                                 >
                                     Create Tag
                                 </button>
@@ -264,7 +269,8 @@ export const TagManager = ({ isOpen, onClose, onTagsChanged, contactId, contactT
                         </button>
                         <button
                             onClick={onClose}
-                            className="flex-1 py-3 bg-red-500 hover:bg-red-600 rounded-2xl text-sm text-white font-bold flex items-center justify-center gap-2 transition-all shadow-md active:scale-95"
+                            className="flex-1 py-3 rounded-2xl text-sm text-white font-bold flex items-center justify-center gap-2 transition-all shadow-md active:scale-95"
+                            style={{ backgroundColor: 'var(--color-accent)' }}
                         >
                             <Check size={18} /> Finish
                         </button>
