@@ -1,15 +1,20 @@
 import { useState } from 'react';
 import { WhatsAppMessage, isOutgoing } from '../types';
 import { AudioPlayer } from './ui/AudioPlayer';
-import { CheckCheck, Clock, X, Download, ZoomIn } from 'lucide-react';
+import { CheckCheck, Clock, X, Download, ZoomIn, ImageIcon } from 'lucide-react';
 
 interface MessageBubbleProps {
     message: WhatsAppMessage;
+    allMessages?: WhatsAppMessage[];
 }
 
-export const MessageBubble = ({ message }: MessageBubbleProps) => {
+export const MessageBubble = ({ message, allMessages }: MessageBubbleProps) => {
     const isOwn = isOutgoing(message);
     const [showImageModal, setShowImageModal] = useState(false);
+
+    const repliedTo = message.is_reply === 'true' && message.reply_to_mid && allMessages
+        ? allMessages.find(m => m.mid === message.reply_to_mid) ?? null
+        : null;
 
     const isRTL = message.text && /[\u0600-\u06FF]/.test(message.text);
 
@@ -58,8 +63,28 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
                 >
                     {/* Reply Indicator */}
                     {message.is_reply === 'true' && message.reply_to_mid && (
-                        <div className="mb-2 px-2 py-1.5 rounded bg-slate-50 border-l-2 text-[11px] text-slate-500 italic" style={{ borderColor: 'var(--color-primary)' }}>
-                            ↩️ Replying to message
+                        <div className="mb-2 rounded-lg bg-slate-50 border-l-2 overflow-hidden" style={{ borderColor: 'var(--color-primary)' }}>
+                            {repliedTo ? (
+                                repliedTo.type === 'image' && repliedTo.media_url ? (
+                                    <div className="flex items-center gap-2 p-1.5">
+                                        <img
+                                            src={repliedTo.media_url}
+                                            alt="Replied image"
+                                            className="w-10 h-10 object-cover rounded flex-shrink-0"
+                                        />
+                                        <span className="text-[11px] text-slate-400 italic">Photo</span>
+                                    </div>
+                                ) : (
+                                    <p className="px-2 py-1.5 text-[11px] text-slate-500 truncate">
+                                        {repliedTo.text || 'Media message'}
+                                    </p>
+                                )
+                            ) : (
+                                <div className="px-2 py-1.5 flex items-center gap-1.5">
+                                    <ImageIcon size={10} className="text-slate-400 flex-shrink-0" />
+                                    <span className="text-[11px] text-slate-400 italic">Original message</span>
+                                </div>
+                            )}
                         </div>
                     )}
 

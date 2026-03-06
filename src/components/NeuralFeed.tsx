@@ -98,7 +98,7 @@ export const NeuralFeed = ({ selectedChat }: NeuralFeedProps) => {
                     </div>
                 ) : (
                     filteredMessages.map((msg) => (
-                        <MessageBubble key={msg.id || msg.mid} message={msg} />
+                        <MessageBubble key={msg.id || msg.mid} message={msg} allMessages={messages} />
                     ))
                 )}
             </div>
