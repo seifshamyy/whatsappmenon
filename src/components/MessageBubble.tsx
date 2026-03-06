@@ -67,7 +67,7 @@ export const MessageBubble = ({ message, allMessages }: MessageBubbleProps) => {
 
     return (
         <>
-            <div className={`flex w-full px-2 sm:px-0 message-animate-in ${isOwn ? 'justify-end' : 'justify-start'}`}>
+            <div className={`flex w-full px-2 sm:px-0 ${isOwn ? 'message-animate-out justify-end' : 'message-animate-in justify-start'}`}>
                 <div
                     className={`
             relative max-w-[85%] sm:max-w-[75%] md:max-w-[65%] px-3 py-2 rounded-2xl shadow-sm
