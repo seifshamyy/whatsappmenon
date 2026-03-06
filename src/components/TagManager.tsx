@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, Plus, Edit2, Trash2, Check } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Tag, TAG_COLORS } from '../types';
+import { useConfig } from '../context/ConfigContext';
 
 interface TagManagerProps {
     isOpen: boolean;
@@ -14,6 +15,7 @@ interface TagManagerProps {
 }
 
 export const TagManager = ({ isOpen, onClose, onTagsChanged, contactId, contactTags = [] }: TagManagerProps) => {
+    const { config } = useConfig();
     const [tags, setTags] = useState<Tag[]>([]);
     const [creating, setCreating] = useState(false);
     const [editingId, setEditingId] = useState<number | null>(null);
@@ -30,14 +32,14 @@ export const TagManager = ({ isOpen, onClose, onTagsChanged, contactId, contactT
     }, [isOpen, contactTags]);
 
     const fetchTags = async () => {
-        const { data } = await supabase.from('tags.buongo').select('*').order('id');
+        const { data } = await supabase.from(config.tableTags).select('*').order('id');
         if (data) setTags(data as Tag[]);
     };
 
     const createTag = async () => {
         if (!tagName.trim()) return;
         setLoading(true);
-        const { error } = await supabase.from('tags.buongo').insert({ 'tag name': tagName.trim(), 'tag hex': tagHex });
+        const { error } = await supabase.from(config.tableTags).insert({ 'tag name': tagName.trim(), 'tag hex': tagHex });
         if (error) console.error('Create tag error:', error);
         setTagName('');
         setTagHex(TAG_COLORS[0].hex);
@@ -50,7 +52,7 @@ export const TagManager = ({ isOpen, onClose, onTagsChanged, contactId, contactT
     const updateTag = async (id: number) => {
         if (!tagName.trim()) return;
         setLoading(true);
-        const { error } = await supabase.from('tags.buongo').update({ 'tag name': tagName.trim(), 'tag hex': tagHex }).eq('id', id);
+        const { error } = await supabase.from(config.tableTags).update({ 'tag name': tagName.trim(), 'tag hex': tagHex }).eq('id', id);
         if (error) console.error('Update tag error:', error);
         setEditingId(null);
         setTagName('');
@@ -61,7 +63,7 @@ export const TagManager = ({ isOpen, onClose, onTagsChanged, contactId, contactT
 
     const deleteTag = async (id: number) => {
         setLoading(true);
-        await supabase.from('tags.buongo').delete().eq('id', id);
+        await supabase.from(config.tableTags).delete().eq('id', id);
         await fetchTags();
         onTagsChanged();
         setLoading(false);
@@ -77,7 +79,7 @@ export const TagManager = ({ isOpen, onClose, onTagsChanged, contactId, contactT
         setLocalContactTags(newTags);
 
         await supabase
-            .from('contacts.buongo')
+            .from(config.tableContacts)
             .update({ tags: newTags })
             .eq('id', contactId);
 

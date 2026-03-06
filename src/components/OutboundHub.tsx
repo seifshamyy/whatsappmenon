@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { Send, Mic, Paperclip, X, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { WhatsAppMessage } from '../types';
+import { useConfig } from '../context/ConfigContext';
 
 interface OutboundHubProps {
     recipientId: string | null;
@@ -20,25 +21,18 @@ interface OutboundHubProps {
 // match lines 1-150 roughly
 
 
-// WhatsApp Business Cloud API Configuration
-const WHATSAPP_API_URL = 'https://graph.facebook.com/v24.0/927913190415819/messages';
-const WHATSAPP_TOKEN = 'EAAWhwdJPMoABQqyclQ0MNsGyfDMvAQqYBRljnZC1PZATRhpa9ZC9Oq0FrhfcFw3w1QDK1VoRvnGOoIFXSGJuAro9bUQW984jdhxfOXZAhVk8IigBry2NPGQ1K5PgfEwE5rrsoqw4i2TshWZBN2Ih3d9Nrkwxp2XhmMyfHAPxduZAzh0DyfzzEi6ZC83dWdYZCvuUDgZDZD';
-
-// Webhook URL
-const WEBHOOK_URL = 'https://primary-production-e1a92.up.railway.app/webhook/d5672c0d-db68-4cbb-8bec-2de8e15515d2';
-
-// Supabase Storage
+// Supabase Storage (infrastructure-level, not app config)
 const SUPABASE_STORAGE_URL = 'https://whmbrguzumyatnslzfsq.supabase.co/storage/v1/object/public/TREE';
 
 // Generate random ID (1 to 1 billion)
 const generateRandomId = () => Math.floor(Math.random() * 1000000000) + 1;
 
 // POST to webhook
-const postToWebhook = async (mid: string, data: string, type: string, to: string) => {
+const postToWebhook = async (mid: string, data: string, type: string, to: string, webhookUrl: string) => {
     try {
         const payload = { mid, data, type, id: generateRandomId(), to };
         console.log('Posting to webhook:', payload);
-        await fetch(WEBHOOK_URL, {
+        await fetch(webhookUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -50,11 +44,11 @@ const postToWebhook = async (mid: string, data: string, type: string, to: string
 };
 
 // Send text via WhatsApp API
-const sendWhatsAppText = async (to: string, text: string) => {
-    const response = await fetch(WHATSAPP_API_URL, {
+const sendWhatsAppText = async (to: string, text: string, apiUrl: string, token: string) => {
+    const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
-            'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -73,11 +67,11 @@ const sendWhatsAppText = async (to: string, text: string) => {
 };
 
 // Send image via WhatsApp API
-const sendWhatsAppImage = async (to: string, imageUrl: string, caption?: string) => {
-    const response = await fetch(WHATSAPP_API_URL, {
+const sendWhatsAppImage = async (to: string, imageUrl: string, apiUrl: string, token: string, caption?: string) => {
+    const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
-            'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -96,11 +90,11 @@ const sendWhatsAppImage = async (to: string, imageUrl: string, caption?: string)
 };
 
 // Send audio via WhatsApp API
-const sendWhatsAppAudio = async (to: string, audioUrl: string) => {
-    const response = await fetch(WHATSAPP_API_URL, {
+const sendWhatsAppAudio = async (to: string, audioUrl: string, apiUrl: string, token: string) => {
+    const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
-            'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -134,7 +128,8 @@ const storeMessage = async (
     text: string | null,
     mediaUrl: string | null,
     mid: string,
-    toNumber: string
+    toNumber: string,
+    tableMessages: string
 ) => {
     const insertData = {
         type,
@@ -144,12 +139,12 @@ const storeMessage = async (
         to: toNumber,
         is_reply: 'false',
         mid,
-        created_at: new Date().toISOString(), // Add timestamp
+        created_at: new Date().toISOString(),
     };
 
     console.log('Storing message:', insertData);
 
-    const { data, error } = await supabase.from('whatsappbuongo').insert(insertData).select();
+    const { data, error } = await supabase.from(tableMessages).insert(insertData).select();
 
     if (error) {
         console.error('DB store failed:', error);
@@ -161,6 +156,7 @@ const storeMessage = async (
 };
 
 export const OutboundHub = ({ recipientId, onMessageSent, addOptimisticMessage }: OutboundHubProps) => {
+    const { config } = useConfig();
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -209,17 +205,17 @@ export const OutboundHub = ({ recipientId, onMessageSent, addOptimisticMessage }
             console.log('Uploaded to:', mediaUrl);
 
             console.log('Sending to WhatsApp...');
-            const apiResponse = await sendWhatsAppAudio(recipientId, mediaUrl);
+            const apiResponse = await sendWhatsAppAudio(recipientId, mediaUrl, config.whatsappApiUrl, config.whatsappToken);
             console.log('WhatsApp response:', apiResponse);
 
             const mid = apiResponse.messages?.[0]?.id || `audio_${Date.now()}`;
 
             console.log('Storing in database...');
             // We don't need the returned data because we already have an optimistic message
-            await storeMessage('audio', null, mediaUrl, mid, recipientId);
+            await storeMessage('audio', null, mediaUrl, mid, recipientId, config.tableMessages);
 
             console.log('Posting to webhook...');
-            await postToWebhook(mid, mediaUrl, 'audio', recipientId);
+            await postToWebhook(mid, mediaUrl, 'audio', recipientId, config.webhookUrl);
 
             if (onMessageSent) {
                 // Optional: still call this if parent needs to know, 
@@ -385,25 +381,25 @@ export const OutboundHub = ({ recipientId, onMessageSent, addOptimisticMessage }
 
                 if (file.type.startsWith('image/')) {
                     msgType = 'image';
-                    apiResponse = await sendWhatsAppImage(recipientId, mediaUrl, wasInput.trim() || undefined);
+                    apiResponse = await sendWhatsAppImage(recipientId, mediaUrl, config.whatsappApiUrl, config.whatsappToken, wasInput.trim() || undefined);
                     dataForWebhook = mediaUrl;
                 } else if (file.type.startsWith('audio/')) {
                     msgType = 'audio';
-                    apiResponse = await sendWhatsAppAudio(recipientId, mediaUrl);
+                    apiResponse = await sendWhatsAppAudio(recipientId, mediaUrl, config.whatsappApiUrl, config.whatsappToken);
                     dataForWebhook = mediaUrl;
                 } else {
                     throw new Error('Unsupported file type');
                 }
 
                 const mid = apiResponse.messages?.[0]?.id || `${msgType}_${Date.now()}`;
-                await storeMessage(msgType, wasInput.trim() || null, mediaUrl, mid, recipientId);
-                await postToWebhook(mid, dataForWebhook, msgType, recipientId);
+                await storeMessage(msgType, wasInput.trim() || null, mediaUrl, mid, recipientId, config.tableMessages);
+                await postToWebhook(mid, dataForWebhook, msgType, recipientId, config.webhookUrl);
             } else {
-                apiResponse = await sendWhatsAppText(recipientId, wasInput.trim());
+                apiResponse = await sendWhatsAppText(recipientId, wasInput.trim(), config.whatsappApiUrl, config.whatsappToken);
                 const mid = apiResponse.messages?.[0]?.id || `text_${Date.now()}`;
 
-                await storeMessage('text', wasInput.trim(), null, mid, recipientId);
-                await postToWebhook(mid, wasInput.trim(), 'text', recipientId);
+                await storeMessage('text', wasInput.trim(), null, mid, recipientId, config.tableMessages);
+                await postToWebhook(mid, wasInput.trim(), 'text', recipientId, config.webhookUrl);
             }
 
             if (onMessageSent) {

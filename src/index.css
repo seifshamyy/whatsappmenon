@@ -2,6 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
+/* CSS custom property defaults — overridden at runtime by ConfigContext */
+:root {
+    --color-primary: #10b981;
+    --color-accent: #ef4444;
+    --color-outgoing-bubble: #ecfdf5;
+    --color-incoming-bubble: #ffffff;
+    --color-chat-bg: #f8fafc;
+    --color-sidebar-bg: #ffffff;
+}
+
+/* Config loading spinner */
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.config-spinner {
+    width: 36px;
+    height: 36px;
+    border: 3px solid #10b981;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto;
+}
+
 * {
     margin: 0;
     padding: 0;

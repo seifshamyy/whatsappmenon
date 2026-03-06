@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, MessageSquare, Calendar, User } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { ContactEbp, Tag, WhatsAppMessage } from '../types';
+import { useConfig } from '../context/ConfigContext';
 
 interface ContactInfoPanelProps {
     contactId: string;
@@ -11,6 +12,7 @@ interface ContactInfoPanelProps {
 }
 
 export const ContactInfoPanel = ({ contactId, isOpen, onClose }: ContactInfoPanelProps) => {
+    const { config } = useConfig();
     const [contact, setContact] = useState<ContactEbp | null>(null);
     const [tags, setTags] = useState<Tag[]>([]);
     const [contactTags, setContactTags] = useState<Tag[]>([]);
@@ -25,7 +27,7 @@ export const ContactInfoPanel = ({ contactId, isOpen, onClose }: ContactInfoPane
 
         // Fetch contact
         const { data: contactData } = await supabase
-            .from('contacts.buongo')
+            .from(config.tableContacts)
             .select('*')
             .eq('id', contactId)
             .single();
@@ -37,12 +39,12 @@ export const ContactInfoPanel = ({ contactId, isOpen, onClose }: ContactInfoPane
         }
 
         // Fetch all tags
-        const { data: tagData } = await supabase.from('tags.buongo').select('*');
+        const { data: tagData } = await supabase.from(config.tableTags).select('*');
         if (tagData) setTags(tagData as Tag[]);
 
         // Fetch messages for stats
         const { data: msgData } = await supabase
-            .from('whatsappbuongo')
+            .from(config.tableMessages)
             .select('*')
             .or(`from.eq.${contactId},to.eq.${contactId}`)
             .order('created_at', { ascending: true });
@@ -80,7 +82,7 @@ export const ContactInfoPanel = ({ contactId, isOpen, onClose }: ContactInfoPane
         setAiEnabled(newState);
 
         await supabase
-            .from('contacts.buongo')
+            .from(config.tableContacts)
             .update({ AI_replies: newState ? 'true' : 'false' })
             .eq('id', contactId);
 

@@ -5,6 +5,7 @@ import { WhatsAppMessage, ContactEbp, Tag, getContactId } from '../types';
 import { TagManager } from './TagManager';
 import { subscribeToPush, isPushSupported } from '../lib/pushNotifications';
 import { PullToRefresh } from './PullToRefresh';
+import { useConfig } from '../context/ConfigContext';
 
 interface SidebarContact {
     id: string;
@@ -61,6 +62,7 @@ let sidebarFetchContactsRef: (() => void) | null = null;
 let sidebarFetchEbpRef: (() => void) | null = null;
 
 export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) => {
+    const { config } = useConfig();
     const [contacts, setContacts] = useState<SidebarContact[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [notifEnabled, setNotifEnabled] = useState(() =>
@@ -76,13 +78,13 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
 
     // Fetch tags
     const fetchTags = useCallback(async () => {
-        const { data } = await supabase.from('tags.buongo').select('*');
+        const { data } = await supabase.from(config.tableTags).select('*');
         if (data) setAllTags(data as Tag[]);
-    }, []);
+    }, [config.tableTags]);
 
     // Fetch contacts from contacts.ebp
     const fetchContactsEbp = useCallback(async () => {
-        const { data } = await supabase.from('contacts.buongo').select('*');
+        const { data } = await supabase.from(config.tableContacts).select('*');
         if (data) {
             const map = new Map<string, ContactEbp>();
             (data as ContactEbp[]).forEach(c => map.set(String(c.id), c));
@@ -109,7 +111,7 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
 
             while (keepGoing) {
                 const { data, error } = await supabase
-                    .from('whatsappbuongo')
+                    .from(config.tableMessages)
                     .select('id, from, to, text, type, created_at')
                     .order('created_at', { ascending: false })
                     .range(from, from + PAGE_SIZE - 1);
@@ -134,7 +136,7 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
         // Fetch messages (paginated) and contacts in parallel
         const [msgs, ebpResult] = await Promise.all([
             fetchAllMessages(),
-            supabase.from('contacts.buongo').select('*'),
+            supabase.from(config.tableContacts).select('*'),
         ]);
 
         // Build a fresh contacts lookup from the inline fetch
@@ -182,7 +184,7 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
         if (selectedChat) {
             const markAsRead = async () => {
                 const { data } = await supabase
-                    .from('whatsappbuongo')
+                    .from(config.tableMessages)
                     .select('id')
                     .eq('from', selectedChat);
 
@@ -218,7 +220,7 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
             sidebarMsgChannel = supabase
                 .channel('sidebar-messages')
                 .on('postgres_changes',
-                    { event: '*', schema: 'public', table: 'whatsappbuongo' },
+                    { event: '*', schema: 'public', table: config.tableMessages },
                     () => sidebarFetchContactsRef?.()
                 )
                 .subscribe((status) => {
@@ -231,7 +233,7 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
             sidebarContactChannel = supabase
                 .channel('sidebar-contacts')
                 .on('postgres_changes',
-                    { event: '*', schema: 'public', table: 'contacts.buongo' },
+                    { event: '*', schema: 'public', table: config.tableContacts },
                     () => { sidebarFetchEbpRef?.(); sidebarFetchContactsRef?.(); }
                 )
                 .subscribe((status) => {
@@ -325,13 +327,13 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                 <div className="px-3 sm:px-4 flex items-center justify-between border-b border-slate-200 bg-white flex-shrink-0" style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top))', paddingBottom: '0.5rem' }}>
                     <div className="flex items-center gap-2">
                         <img
-                            src="https://whmbrguzumyatnslzfsq.supabase.co/storage/v1/object/public/TREE/buongo.jpg"
-                            alt="Buongo Logo"
+                            src={config.sidebarLogoUrl}
+                            alt={config.appName}
                             className="w-8 h-8 rounded-full object-cover border border-slate-200"
                         />
                         <div className="flex flex-col">
-                            <span className="font-bold text-slate-900 text-sm leading-tight">Buongo</span>
-                            <span className="text-slate-500 font-medium text-[10px]">Active Hub</span>
+                            <span className="font-bold text-slate-900 text-sm leading-tight">{config.appName}</span>
+                            <span className="text-slate-500 font-medium text-[10px]">{config.sidebarSubtitle}</span>
                         </div>
                     </div>
                     <div className="flex items-center gap-1">
@@ -494,7 +496,7 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
 
                 {/* Footer */}
                 <div className="hidden sm:flex h-8 px-4 items-center justify-center border-t border-slate-100 bg-slate-50 flex-shrink-0">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">BUONGO v1.1</span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{config.footerText}</span>
                 </div>
             </div>
 

@@ -3,6 +3,7 @@ import { ArrowLeft, MoreVertical, User, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { ContactEbp } from '../types';
 import { ContactInfoPanel } from './ContactInfoPanel';
+import { useConfig } from '../context/ConfigContext';
 
 interface ChatHeaderProps {
     contactId: string | null;
@@ -12,6 +13,7 @@ interface ChatHeaderProps {
 }
 
 export const ChatHeader = ({ contactId, onBack, showBackButton, onChatDeleted }: ChatHeaderProps) => {
+    const { config } = useConfig();
     const [contact, setContact] = useState<ContactEbp | null>(null);
     const [aiEnabled, setAiEnabled] = useState(false);
     const [toggling, setToggling] = useState(false);
@@ -24,7 +26,7 @@ export const ChatHeader = ({ contactId, onBack, showBackButton, onChatDeleted }:
     const fetchContact = useCallback(async () => {
         if (!contactId) return;
         const { data } = await supabase
-            .from('contacts.buongo')
+            .from(config.tableContacts)
             .select('*')
             .eq('id', contactId)
             .single();
@@ -61,7 +63,7 @@ export const ChatHeader = ({ contactId, onBack, showBackButton, onChatDeleted }:
         setAiEnabled(newState);
 
         await supabase
-            .from('contacts.buongo')
+            .from(config.tableContacts)
             .update({ AI_replies: newState ? 'true' : 'false' })
             .eq('id', contactId);
 
@@ -74,7 +76,7 @@ export const ChatHeader = ({ contactId, onBack, showBackButton, onChatDeleted }:
 
         // Delete all messages where this contact is sender or receiver
         await supabase
-            .from('whatsappbuongo')
+            .from(config.tableMessages)
             .delete()
             .or(`from.eq.${contactId},to.eq.${contactId}`);
 

@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { Routes, Route } from 'react-router-dom';
 import { ChatSidebar } from './components/ChatSidebar';
 import { ChatHeader } from './components/ChatHeader';
 import { NeuralFeed } from './components/NeuralFeed';
 import { OutboundHub } from './components/OutboundHub';
+import { AdminConfig } from './pages/AdminConfig';
 import { useMessages } from './hooks/useMessages';
+import { useConfig } from './context/ConfigContext';
 import { registerServiceWorker } from './lib/pushNotifications';
 
 function App() {
@@ -80,6 +83,28 @@ function App() {
     }, [handleBack]);
 
     return (
+        <Routes>
+            {/* TODO: Add auth guard */}
+            <Route path="/adminconfiguration" element={<AdminConfig />} />
+            <Route path="*" element={<ChatApp rootRef={rootRef} selectedChat={selectedChat} showMobileChat={showMobileChat} handleSelectChat={handleSelectChat} handleBack={handleBack} handleMessageSent={handleMessageSent} addOptimisticMessage={addOptimisticMessage} refetch={refetch} />} />
+        </Routes>
+    );
+}
+
+interface ChatAppProps {
+    rootRef: React.RefObject<HTMLDivElement>;
+    selectedChat: string | null;
+    showMobileChat: boolean;
+    handleSelectChat: (id: string) => void;
+    handleBack: () => void;
+    handleMessageSent: () => void;
+    addOptimisticMessage: (msg: any) => any;
+    refetch: () => Promise<void>;
+}
+
+function ChatApp({ rootRef, selectedChat, showMobileChat, handleSelectChat, handleBack, handleMessageSent, addOptimisticMessage, refetch }: ChatAppProps) {
+    const { config } = useConfig();
+    return (
         <div ref={rootRef} className="w-full h-full overflow-hidden bg-white">
             {/* 
               Mobile: Sliding container (200vw width)
@@ -128,7 +153,7 @@ function App() {
                                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                                     </svg>
                                 </div>
-                                <h2 className="text-slate-900 text-2xl font-bold mb-2">Buongo</h2>
+                                <h2 className="text-slate-900 text-2xl font-bold mb-2">{config.appName}</h2>
                                 <p className="text-slate-500 text-sm">Select a conversation to get started</p>
                             </div>
                         </div>

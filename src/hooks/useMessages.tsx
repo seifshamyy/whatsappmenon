@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { WhatsAppMessage } from '../types';
+import { useConfig } from '../context/ConfigContext';
 import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 
 interface MessagesContextType {
@@ -24,6 +25,11 @@ export const MessagesProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const [error, setError] = useState<string | null>(null);
     const setMessagesRef = useRef(setMessages);
     setMessagesRef.current = setMessages;
+
+    const { config } = useConfig();
+    // Capture table name at mount time for the singleton channel
+    const tableMessagesRef = useRef(config.tableMessages);
+    tableMessagesRef.current = config.tableMessages;
 
     // Ref holds the current contact ID so the singleton channel
     // and resilience callbacks always use the latest value.
@@ -49,7 +55,7 @@ export const MessagesProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             // Root-cause fix: Supabase silently truncates unfiltered queries at 1000 rows.
             // Scoping to one contact makes the row limit irrelevant.
             const { data, error: fetchError } = await supabase
-                .from('whatsappbuongo')
+                .from(tableMessagesRef.current)
                 .select('*')
                 .or(`from.eq.${id},to.eq.${id}`)
                 .order('created_at', { ascending: true });
@@ -110,7 +116,7 @@ export const MessagesProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 .channel('messages-realtime-v7')
                 .on(
                     'postgres_changes',
-                    { event: '*', schema: 'public', table: 'whatsappbuongo' },
+                    { event: '*', schema: 'public', table: tableMessagesRef.current },
                     (payload: RealtimePostgresChangesPayload<WhatsAppMessage>) => {
                         const currentId = contactIdRef.current;
                         if (!currentId) return; // no chat open

@@ -3,6 +3,7 @@ import { useMessages } from '../hooks/useMessages';
 import { MessageBubble } from './MessageBubble';
 import { MessageSquare } from 'lucide-react';
 import { getContactId } from '../types';
+import { useConfig } from '../context/ConfigContext';
 
 interface NeuralFeedProps {
     selectedChat: string | null;
@@ -10,6 +11,7 @@ interface NeuralFeedProps {
 
 export const NeuralFeed = ({ selectedChat }: NeuralFeedProps) => {
     const { messages, loading, error } = useMessages();
+    const { config } = useConfig();
     const containerRef = useRef<HTMLDivElement>(null);
     const [prevMsgCount, setPrevMsgCount] = useState(0);
 
@@ -41,7 +43,7 @@ export const NeuralFeed = ({ selectedChat }: NeuralFeedProps) => {
                     <div className="w-24 h-24 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-6 border border-emerald-100 shadow-sm">
                         <MessageSquare size={40} className="text-emerald-500" />
                     </div>
-                    <h3 className="text-slate-900 text-2xl font-bold mb-2">Buongo</h3>
+                    <h3 className="text-slate-900 text-2xl font-bold mb-2">{config.appName}</h3>
                     <p className="text-slate-500 text-sm max-w-xs mx-auto">
                         Ready to assist. Select a conversation to manage your outreach.
                     </p>
@@ -80,7 +82,7 @@ export const NeuralFeed = ({ selectedChat }: NeuralFeedProps) => {
                 display: 'flex',
                 flexDirection: 'column-reverse',
                 backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%2364748b' fill-opacity='0.1'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
-                backgroundColor: '#f8fafc'
+                backgroundColor: config.colorChatBg
             }}
         >
             {/* Single wrapper div inside column-reverse container.
