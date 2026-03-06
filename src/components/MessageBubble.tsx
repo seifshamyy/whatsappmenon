@@ -8,6 +8,27 @@ interface MessageBubbleProps {
     allMessages?: WhatsAppMessage[];
 }
 
+const URL_REGEX = /(https?:\/\/[^\s]+)/g;
+
+function renderTextWithLinks(text: string) {
+    const parts = text.split(URL_REGEX);
+    return parts.map((part, i) =>
+        URL_REGEX.test(part) ? (
+            <a
+                key={i}
+                href={part}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline break-all"
+                style={{ color: 'var(--color-primary)' }}
+                onClick={e => e.stopPropagation()}
+            >
+                {part}
+            </a>
+        ) : part
+    );
+}
+
 export const MessageBubble = ({ message, allMessages }: MessageBubbleProps) => {
     const isOwn = isOutgoing(message);
     const [showImageModal, setShowImageModal] = useState(false);
@@ -123,8 +144,8 @@ export const MessageBubble = ({ message, allMessages }: MessageBubbleProps) => {
 
                     {/* Text */}
                     {message.text && (
-                        <p className="text-[14px] sm:text-[15px] leading-relaxed whitespace-pre-wrap font-medium">
-                            {message.text}
+                        <p className="text-[14px] sm:text-[15px] leading-relaxed whitespace-pre-wrap font-medium break-words">
+                            {renderTextWithLinks(message.text)}
                         </p>
                     )}
 
