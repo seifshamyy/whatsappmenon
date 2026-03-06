@@ -133,7 +133,13 @@ export const MessagesProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
                             setMessagesRef.current((prev) => {
                                 const existingIndex = prev.findIndex(
-                                    (m) => m.id === newMsg.id || (m.mid && newMsg.mid && m.mid === newMsg.mid)
+                                    (m) =>
+                                        m.id === newMsg.id ||
+                                        (m.mid && newMsg.mid && m.mid === newMsg.mid) ||
+                                        // Match optimistic outgoing message that hasn't received a mid yet
+                                        (m.status === 'sending' && !m.mid &&
+                                            m.to === newMsg.to && m.type === newMsg.type &&
+                                            (m.type !== 'text' || m.text === newMsg.text))
                                 );
                                 if (existingIndex !== -1) {
                                     const updated = [...prev];
