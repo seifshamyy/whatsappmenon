@@ -37,6 +37,9 @@ html,
 body,
 #root {
     height: 100%;
+    /* dvh shrinks automatically when the on-screen keyboard opens on Android.
+       Fallback: 100% (handled at runtime by the Visual Viewport API listener). */
+    height: 100dvh;
     width: 100%;
     overflow: hidden;
     background-color: #ffffff;

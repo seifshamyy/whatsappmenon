@@ -25,6 +25,29 @@ function App() {
         registerServiceWorker();
     }, []);
 
+    // Fix: on Android devices that use keyboard-overlay mode (Samsung, etc.) the
+    // viewport does NOT shrink when the keyboard appears, so fixed/flex-bottom elements
+    // are hidden under the keyboard. visualViewport.height always reflects the truly
+    // visible area above the keyboard on ALL devices (both resize and overlay modes).
+    // Setting --vv-height lets the root container match the visible area exactly.
+    useEffect(() => {
+        const vv = window.visualViewport;
+        if (!vv) return;
+
+        const update = () => {
+            document.documentElement.style.setProperty('--vv-height', `${Math.round(vv.height)}px`);
+        };
+
+        vv.addEventListener('resize', update);
+        vv.addEventListener('scroll', update);
+        update(); // set initial value
+
+        return () => {
+            vv.removeEventListener('resize', update);
+            vv.removeEventListener('scroll', update);
+        };
+    }, []);
+
     const handleSelectChat = (contactId: string) => {
         setSelectedChat(contactId);
         setContactId(contactId);
@@ -137,7 +160,7 @@ interface ChatAppProps {
 function ChatApp({ rootRef, selectedChat, showMobileChat, handleSelectChat, handleBack, handleMessageSent, addOptimisticMessage, refetch }: ChatAppProps) {
     const { config } = useConfig();
     return (
-        <div ref={rootRef} className="w-full h-full overflow-hidden" style={{ backgroundColor: 'var(--color-chat-bg)' }}>
+        <div ref={rootRef} className="w-full overflow-hidden" style={{ height: 'var(--vv-height, 100%)', backgroundColor: 'var(--color-chat-bg)' }}>
             {/* 
               Mobile: Sliding container (200vw width)
               Desktop: Normal Flex container (100% width)

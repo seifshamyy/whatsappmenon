@@ -395,28 +395,41 @@ export const OutboundHub = ({ recipientId, onMessageSent, addOptimisticMessage }
 
         try {
             if (filesToSend.length > 0) {
-                for (let i = 0; i < filesToSend.length; i++) {
-                    const file = filesToSend[i];
-                    setUploadProgress({ current: i + 1, total: filesToSend.length });
+                // All files upload + send concurrently — no waiting for each other
+                setUploadProgress({ current: 0, total: filesToSend.length });
+                let completed = 0;
 
-                    const fileName = `${generateRandomId()}_${file.name}`;
-                    const mediaUrl = await uploadToStorage(file, fileName);
-                    const caption = i === 0 ? (textToSend || undefined) : undefined;
+                const results = await Promise.allSettled(
+                    filesToSend.map(async (file, i) => {
+                        const fileName = `${generateRandomId()}_${file.name}`;
+                        const mediaUrl = await uploadToStorage(file, fileName);
+                        const caption = i === 0 ? (textToSend || undefined) : undefined;
 
-                    let apiResponse;
-                    let msgType: string;
+                        let apiResponse;
+                        let msgType: string;
 
-                    if (file.type.startsWith('image/')) {
-                        msgType = 'image';
-                        apiResponse = await sendWhatsAppImage(recipientId, mediaUrl, config.whatsappApiUrl, config.whatsappToken, caption);
-                    } else {
-                        msgType = 'audio';
-                        apiResponse = await sendWhatsAppAudio(recipientId, mediaUrl, config.whatsappApiUrl, config.whatsappToken);
-                    }
+                        if (file.type.startsWith('image/')) {
+                            msgType = 'image';
+                            apiResponse = await sendWhatsAppImage(recipientId, mediaUrl, config.whatsappApiUrl, config.whatsappToken, caption);
+                        } else {
+                            msgType = 'audio';
+                            apiResponse = await sendWhatsAppAudio(recipientId, mediaUrl, config.whatsappApiUrl, config.whatsappToken);
+                        }
 
-                    const mid = apiResponse.messages?.[0]?.id || `${msgType}_${Date.now()}`;
-                    await storeMessage(msgType, i === 0 ? (textToSend || null) : null, mediaUrl, mid, recipientId, config.tableMessages);
-                    await postToWebhook(mid, mediaUrl, msgType, recipientId, config.webhookUrl);
+                        const mid = apiResponse.messages?.[0]?.id || `${msgType}_${Date.now()}`;
+                        await storeMessage(msgType, i === 0 ? (textToSend || null) : null, mediaUrl, mid, recipientId, config.tableMessages);
+                        await postToWebhook(mid, mediaUrl, msgType, recipientId, config.webhookUrl);
+
+                        // Update counter as each one finishes
+                        completed += 1;
+                        setUploadProgress({ current: completed, total: filesToSend.length });
+                    })
+                );
+
+                const failed = results.filter(r => r.status === 'rejected').length;
+                if (failed > 0) {
+                    setError(`${failed} file${failed > 1 ? 's' : ''} failed to send`);
+                    setTimeout(() => setError(null), 5000);
                 }
             } else {
                 const apiResponse = await sendWhatsAppText(recipientId, textToSend, config.whatsappApiUrl, config.whatsappToken);
@@ -493,15 +506,43 @@ export const OutboundHub = ({ recipientId, onMessageSent, addOptimisticMessage }
                 </div>
             )}
 
-            {/* Sending indicator - Only for file/audio uploads */}
-            {sending && (uploadProgress !== null || isRecording) && (
+            {/* Upload progress indicator */}
+            {sending && uploadProgress !== null && (
+                <div className="mb-2 px-3 py-2 rounded-xl border" style={{ backgroundColor: 'color-mix(in srgb, var(--color-primary) 6%, white)', borderColor: 'color-mix(in srgb, var(--color-primary) 18%, white)' }}>
+                    <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-1.5">
+                            <Loader2 size={12} className="animate-spin" style={{ color: 'var(--color-primary)' }} />
+                            <span className="text-[11px] font-bold tracking-wide" style={{ color: 'var(--color-primary)' }}>
+                                {uploadProgress.total > 1
+                                    ? `Sending ${uploadProgress.current} of ${uploadProgress.total}`
+                                    : 'Sending…'}
+                            </span>
+                        </div>
+                        {uploadProgress.total > 1 && (
+                            <span className="text-[11px] font-mono font-bold" style={{ color: 'var(--color-primary)' }}>
+                                {Math.round((uploadProgress.current / uploadProgress.total) * 100)}%
+                            </span>
+                        )}
+                    </div>
+                    {/* Progress bar */}
+                    <div className="h-1 rounded-full overflow-hidden bg-slate-200">
+                        <div
+                            className="h-full rounded-full transition-all duration-300 ease-out"
+                            style={{
+                                backgroundColor: 'var(--color-primary)',
+                                width: uploadProgress.total > 0
+                                    ? `${(uploadProgress.current / uploadProgress.total) * 100}%`
+                                    : '15%', // pulse-like start
+                            }}
+                        />
+                    </div>
+                </div>
+            )}
+            {/* Audio recording upload indicator */}
+            {sending && isRecording === false && uploadProgress === null && (
                 <div className="mb-2 p-2 rounded-xl flex items-center gap-2 border" style={{ backgroundColor: 'color-mix(in srgb, var(--color-primary) 8%, white)', borderColor: 'color-mix(in srgb, var(--color-primary) 20%, white)' }}>
                     <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-primary)' }} />
-                    <span className="text-xs font-bold font-mono" style={{ color: 'var(--color-primary)' }}>
-                        {uploadProgress && uploadProgress.total > 1
-                            ? `UPLOADING ${uploadProgress.current}/${uploadProgress.total}...`
-                            : 'UPLOADING...'}
-                    </span>
+                    <span className="text-xs font-bold" style={{ color: 'var(--color-primary)' }}>Sending…</span>
                 </div>
             )}
 
@@ -553,6 +594,14 @@ export const OutboundHub = ({ recipientId, onMessageSent, addOptimisticMessage }
                             value={input}
                             onChange={(e) => { setInput(e.target.value); autoResize(); }}
                             onKeyDown={handleKeyDown}
+                            onFocus={() => {
+                                // On Android, after the keyboard opens the Visual Viewport
+                                // resizes our container. Give it ~300ms to settle, then
+                                // scroll the input into the visible area if needed.
+                                setTimeout(() => {
+                                    textareaRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                                }, 300);
+                            }}
                             placeholder="Message..."
                             className="w-full bg-transparent text-slate-900 px-4 py-2 text-[14px] sm:text-[15px] resize-none focus:outline-none placeholder:text-slate-400 italic"
                             rows={1}
