@@ -35,6 +35,12 @@ function App() {
         if (!vv) return;
 
         const update = () => {
+            // iOS Safari scrolls the layout viewport (offsetTop > 0) to center the
+            // focused input when the keyboard opens. Reset that scroll so our app
+            // doesn't jump — the visual viewport height already accounts for the keyboard.
+            if (vv.offsetTop > 0) {
+                window.scrollTo(0, 0);
+            }
             document.documentElement.style.setProperty('--vv-height', `${Math.round(vv.height)}px`);
         };
 

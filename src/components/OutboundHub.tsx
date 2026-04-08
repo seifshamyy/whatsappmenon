@@ -388,9 +388,12 @@ export const OutboundHub = ({ recipientId, onMessageSent, addOptimisticMessage }
             });
         }
 
-        // Clear UI immediately
+        // Clear UI immediately and keep keyboard up
         setInput('');
-        if (textareaRef.current) textareaRef.current.style.height = 'auto';
+        if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto';
+            textareaRef.current.focus(); // keep keyboard visible after send
+        }
         clearFiles();
 
         try {
@@ -582,6 +585,7 @@ export const OutboundHub = ({ recipientId, onMessageSent, addOptimisticMessage }
                 <div className="flex items-end gap-1 sm:gap-2">
 
                     <button
+                        onPointerDown={(e) => e.preventDefault()}
                         onClick={() => fileInputRef.current?.click()}
                         className="p-2.5 rounded-full text-slate-400 hover:text-[var(--color-primary)] transition-all"
                     >
@@ -594,14 +598,6 @@ export const OutboundHub = ({ recipientId, onMessageSent, addOptimisticMessage }
                             value={input}
                             onChange={(e) => { setInput(e.target.value); autoResize(); }}
                             onKeyDown={handleKeyDown}
-                            onFocus={() => {
-                                // On Android, after the keyboard opens the Visual Viewport
-                                // resizes our container. Give it ~300ms to settle, then
-                                // scroll the input into the visible area if needed.
-                                setTimeout(() => {
-                                    textareaRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-                                }, 300);
-                            }}
                             placeholder="Message..."
                             className="w-full bg-transparent text-slate-900 px-4 py-2 text-[14px] sm:text-[15px] resize-none focus:outline-none placeholder:text-slate-400 italic"
                             rows={1}
@@ -611,6 +607,7 @@ export const OutboundHub = ({ recipientId, onMessageSent, addOptimisticMessage }
 
                     {(input.trim() || selectedFiles.length > 0) ? (
                         <button
+                            onPointerDown={(e) => e.preventDefault()} // prevent textarea blur → keyboard stays up
                             onClick={handleSend}
                             disabled={sending && uploadProgress !== null}
                             className="p-2.5 rounded-full text-white transition-all shadow-md active:scale-95 disabled:opacity-50"
