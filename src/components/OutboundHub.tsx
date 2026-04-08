@@ -160,8 +160,9 @@ export const OutboundHub = ({ recipientId, onMessageSent, addOptimisticMessage }
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [selectedFile, setSelectedFile] = useState<File | null>(null);
-    const [filePreview, setFilePreview] = useState<string | null>(null);
+    const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+    const [filePreviews, setFilePreviews] = useState<string[]>([]);
+    const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
 
     // Audio recording state
     const [isRecording, setIsRecording] = useState(false);
@@ -312,99 +313,119 @@ export const OutboundHub = ({ recipientId, onMessageSent, addOptimisticMessage }
     };
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        setSelectedFile(file);
-        if (file.type.startsWith('image/')) {
-            const reader = new FileReader();
-            reader.onload = (e) => setFilePreview(e.target?.result as string);
-            reader.readAsDataURL(file);
-        } else {
-            setFilePreview(null);
-        }
-    };
+        const files = Array.from(e.target.files || []);
+        if (!files.length) return;
 
-    const clearFile = () => {
-        setSelectedFile(null);
-        setFilePreview(null);
+        setSelectedFiles(prev => [...prev, ...files]);
+
+        files.forEach(file => {
+            if (file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    setFilePreviews(prev => [...prev, ev.target?.result as string]);
+                };
+                reader.readAsDataURL(file);
+            } else {
+                // non-image (audio file via picker): placeholder
+                setFilePreviews(prev => [...prev, '']);
+            }
+        });
+
+        // Reset so the same file can be re-selected if removed
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
+    const clearFiles = () => {
+        setSelectedFiles([]);
+        setFilePreviews([]);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
+    const removeFile = (index: number) => {
+        setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+        setFilePreviews(prev => prev.filter((_, i) => i !== index));
+    };
+
     const handleSend = async () => {
-        if ((!input.trim() && !selectedFile) || !recipientId) return;
+        const filesToSend = selectedFiles;
+        const textToSend = input.trim();
+
+        if (!textToSend && filesToSend.length === 0) return;
+        if (!recipientId) return;
 
         setSending(true);
         setError(null);
 
-        const tempId = Date.now();
-        const inputText = input.trim();
-        const file = selectedFile;
-        // Optimistic Update
-        let optimisticType: any = 'text';
-        let optimisticUrl: string | null = null;
+        const baseTime = Date.now();
 
-        if (file) {
-            if (file.type.startsWith('image/')) optimisticType = 'image';
-            else if (file.type.startsWith('audio/')) optimisticType = 'audio';
-            // Create local preview URL
-            optimisticUrl = URL.createObjectURL(file);
+        // Add all optimistic bubbles upfront so user sees them immediately
+        if (filesToSend.length > 0) {
+            filesToSend.forEach((file, i) => {
+                const type = file.type.startsWith('image/') ? 'image' : 'audio';
+                addOptimisticMessage({
+                    id: baseTime + i,
+                    type,
+                    text: i === 0 ? (textToSend || null) : null, // caption on first only
+                    media_url: URL.createObjectURL(file),
+                    from: null,
+                    to: recipientId,
+                    mid: null,
+                    created_at: new Date(baseTime + i).toISOString(),
+                    status: 'sending',
+                });
+            });
+        } else {
+            addOptimisticMessage({
+                id: baseTime,
+                type: 'text',
+                text: textToSend,
+                media_url: null,
+                from: null,
+                to: recipientId,
+                mid: null,
+                created_at: new Date(baseTime).toISOString(),
+                status: 'sending',
+            });
         }
 
-        addOptimisticMessage({
-            id: tempId,
-            type: optimisticType,
-            text: inputText || null,
-            media_url: optimisticUrl,
-            from: null,
-            to: recipientId,
-            mid: null,
-            created_at: new Date().toISOString(),
-            status: 'sending'
-        });
-
-        // Clear input immediately for "instant" feel
-        const wasInput = input;
+        // Clear UI immediately
         setInput('');
         if (textareaRef.current) textareaRef.current.style.height = 'auto';
-        clearFile();
+        clearFiles();
 
         try {
-            let apiResponse;
-            let msgType = 'text';
-            let mediaUrl: string | null = null;
-            let dataForWebhook: string;
+            if (filesToSend.length > 0) {
+                for (let i = 0; i < filesToSend.length; i++) {
+                    const file = filesToSend[i];
+                    setUploadProgress({ current: i + 1, total: filesToSend.length });
 
-            if (file) {
-                const fileName = `${generateRandomId()}_${file.name}`;
-                mediaUrl = await uploadToStorage(file, fileName);
+                    const fileName = `${generateRandomId()}_${file.name}`;
+                    const mediaUrl = await uploadToStorage(file, fileName);
+                    const caption = i === 0 ? (textToSend || undefined) : undefined;
 
-                if (file.type.startsWith('image/')) {
-                    msgType = 'image';
-                    apiResponse = await sendWhatsAppImage(recipientId, mediaUrl, config.whatsappApiUrl, config.whatsappToken, wasInput.trim() || undefined);
-                    dataForWebhook = mediaUrl;
-                } else if (file.type.startsWith('audio/')) {
-                    msgType = 'audio';
-                    apiResponse = await sendWhatsAppAudio(recipientId, mediaUrl, config.whatsappApiUrl, config.whatsappToken);
-                    dataForWebhook = mediaUrl;
-                } else {
-                    throw new Error('Unsupported file type');
+                    let apiResponse;
+                    let msgType: string;
+
+                    if (file.type.startsWith('image/')) {
+                        msgType = 'image';
+                        apiResponse = await sendWhatsAppImage(recipientId, mediaUrl, config.whatsappApiUrl, config.whatsappToken, caption);
+                    } else {
+                        msgType = 'audio';
+                        apiResponse = await sendWhatsAppAudio(recipientId, mediaUrl, config.whatsappApiUrl, config.whatsappToken);
+                    }
+
+                    const mid = apiResponse.messages?.[0]?.id || `${msgType}_${Date.now()}`;
+                    await storeMessage(msgType, i === 0 ? (textToSend || null) : null, mediaUrl, mid, recipientId, config.tableMessages);
+                    await postToWebhook(mid, mediaUrl, msgType, recipientId, config.webhookUrl);
                 }
-
-                const mid = apiResponse.messages?.[0]?.id || `${msgType}_${Date.now()}`;
-                await storeMessage(msgType, wasInput.trim() || null, mediaUrl, mid, recipientId, config.tableMessages);
-                await postToWebhook(mid, dataForWebhook, msgType, recipientId, config.webhookUrl);
             } else {
-                apiResponse = await sendWhatsAppText(recipientId, wasInput.trim(), config.whatsappApiUrl, config.whatsappToken);
+                const apiResponse = await sendWhatsAppText(recipientId, textToSend, config.whatsappApiUrl, config.whatsappToken);
                 const mid = apiResponse.messages?.[0]?.id || `text_${Date.now()}`;
-
-                await storeMessage('text', wasInput.trim(), null, mid, recipientId, config.tableMessages);
-                await postToWebhook(mid, wasInput.trim(), 'text', recipientId, config.webhookUrl);
+                await storeMessage('text', textToSend, null, mid, recipientId, config.tableMessages);
+                await postToWebhook(mid, textToSend, 'text', recipientId, config.webhookUrl);
             }
 
-            if (onMessageSent) {
-                // Optional legacy callback
-                onMessageSent({ id: tempId });
-            }
+            if (onMessageSent) onMessageSent({ id: baseTime });
 
         } catch (err: any) {
             console.error('Send error:', err);
@@ -412,6 +433,7 @@ export const OutboundHub = ({ recipientId, onMessageSent, addOptimisticMessage }
             setTimeout(() => setError(null), 5000);
         } finally {
             setSending(false);
+            setUploadProgress(null);
         }
     };
 
@@ -443,6 +465,7 @@ export const OutboundHub = ({ recipientId, onMessageSent, addOptimisticMessage }
                 ref={fileInputRef}
                 type="file"
                 accept="image/*,audio/*"
+                multiple
                 onChange={handleFileSelect}
                 className="hidden"
             />
@@ -471,30 +494,46 @@ export const OutboundHub = ({ recipientId, onMessageSent, addOptimisticMessage }
             )}
 
             {/* Sending indicator - Only for file/audio uploads */}
-            {sending && (selectedFile || isRecording) && (
+            {sending && (uploadProgress !== null || isRecording) && (
                 <div className="mb-2 p-2 rounded-xl flex items-center gap-2 border" style={{ backgroundColor: 'color-mix(in srgb, var(--color-primary) 8%, white)', borderColor: 'color-mix(in srgb, var(--color-primary) 20%, white)' }}>
                     <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-primary)' }} />
-                    <span className="text-xs font-bold font-mono" style={{ color: 'var(--color-primary)' }}>UPLOADING...</span>
+                    <span className="text-xs font-bold font-mono" style={{ color: 'var(--color-primary)' }}>
+                        {uploadProgress && uploadProgress.total > 1
+                            ? `UPLOADING ${uploadProgress.current}/${uploadProgress.total}...`
+                            : 'UPLOADING...'}
+                    </span>
                 </div>
             )}
 
-            {/* File Preview */}
-            {selectedFile && !isRecording && !sending && (
-                <div className="mb-2 p-2 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-3 shadow-sm">
-                    {filePreview ? (
-                        <img src={filePreview} alt="Preview" className="w-12 h-12 sm:w-16 sm:h-16 object-cover rounded-xl border border-white shadow-sm" />
-                    ) : (
-                        <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ backgroundColor: 'color-mix(in srgb, var(--color-primary) 10%, white)' }}>
-                            <Mic size={20} style={{ color: 'var(--color-primary)' }} />
-                        </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                        <p className="text-slate-900 text-xs sm:text-sm font-bold truncate">{selectedFile.name}</p>
-                        <p className="text-slate-500 text-[10px] sm:text-xs">{(selectedFile.size / 1024).toFixed(1)} KB</p>
+            {/* Multi-file preview strip */}
+            {selectedFiles.length > 0 && !isRecording && !sending && (
+                <div className="mb-2 bg-slate-50 rounded-2xl border border-slate-100 p-2 shadow-sm">
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                        {selectedFiles.map((_file, i) => (
+                            <div key={i} className="relative flex-shrink-0">
+                                {filePreviews[i] ? (
+                                    <img
+                                        src={filePreviews[i]}
+                                        alt={`Preview ${i + 1}`}
+                                        className="w-14 h-14 sm:w-16 sm:h-16 object-cover rounded-xl border border-white shadow-sm"
+                                    />
+                                ) : (
+                                    <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl flex items-center justify-center" style={{ backgroundColor: 'color-mix(in srgb, var(--color-primary) 10%, white)' }}>
+                                        <Mic size={18} style={{ color: 'var(--color-primary)' }} />
+                                    </div>
+                                )}
+                                <button
+                                    onClick={() => removeFile(i)}
+                                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-slate-700 text-white flex items-center justify-center shadow-md"
+                                >
+                                    <X size={10} />
+                                </button>
+                            </div>
+                        ))}
                     </div>
-                    <button onClick={clearFile} className="p-2 rounded-full text-slate-400 hover:text-[var(--color-primary)] transition-colors">
-                        <X size={18} />
-                    </button>
+                    {selectedFiles.length > 1 && (
+                        <p className="text-[10px] text-slate-400 mt-1.5 font-medium">{selectedFiles.length} files · caption goes on first</p>
+                    )}
                 </div>
             )}
 
@@ -521,14 +560,14 @@ export const OutboundHub = ({ recipientId, onMessageSent, addOptimisticMessage }
                         />
                     </div>
 
-                    {(input.trim() || selectedFile) ? (
+                    {(input.trim() || selectedFiles.length > 0) ? (
                         <button
                             onClick={handleSend}
-                            disabled={sending && !!selectedFile} // Only disable if sending a FILE
+                            disabled={sending && uploadProgress !== null}
                             className="p-2.5 rounded-full text-white transition-all shadow-md active:scale-95 disabled:opacity-50"
                             style={{ backgroundColor: 'var(--color-primary)' }}
                         >
-                            {(sending && !!selectedFile) ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
+                            {(sending && uploadProgress !== null) ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
                         </button>
                     ) : (
                         <button

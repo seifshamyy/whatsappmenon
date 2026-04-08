@@ -14,6 +14,12 @@ function App() {
     const [showMobileChat, setShowMobileChat] = useState(false);
     const { addOptimisticMessage, refetch, setContactId } = useMessages();
     const rootRef = useRef<HTMLDivElement>(null);
+    // Ref so the popstate listener always reads the latest value without re-subscribing
+    const showMobileChatRef = useRef(false);
+
+    useEffect(() => {
+        showMobileChatRef.current = showMobileChat;
+    }, [showMobileChat]);
 
     useEffect(() => {
         registerServiceWorker();
@@ -23,13 +29,41 @@ function App() {
         setSelectedChat(contactId);
         setContactId(contactId);
         setShowMobileChat(true);
+        // Push a history entry so the Android hardware back button returns to the
+        // sidebar instead of exiting the PWA entirely.
+        if (window.innerWidth < 768) {
+            window.history.pushState({ mobileChat: true }, '');
+        }
     };
 
+    // Pure state reset — does NOT touch history (called by popstate handler too)
     const handleBack = useCallback(() => {
         setShowMobileChat(false);
         setSelectedChat(null);
         setContactId(null);
     }, [setContactId]);
+
+    // Used by in-app back button and swipe gesture.
+    // If we pushed a history entry when opening the chat, pop it — this triggers
+    // the popstate handler which calls handleBack(). Otherwise call directly.
+    const handleBackButton = useCallback(() => {
+        if (window.history.state?.mobileChat) {
+            window.history.back(); // → fires popstate → handleBack()
+        } else {
+            handleBack();
+        }
+    }, [handleBack]);
+
+    // Android hardware back button: intercept popstate and go back to sidebar
+    useEffect(() => {
+        const onPopState = () => {
+            if (showMobileChatRef.current) {
+                handleBack();
+            }
+        };
+        window.addEventListener('popstate', onPopState);
+        return () => window.removeEventListener('popstate', onPopState);
+    }, [handleBack]);
 
     const handleMessageSent = () => {
         // Realtime subscription handles this automatically
@@ -45,7 +79,6 @@ function App() {
 
         const onTouchStart = (e: TouchEvent) => {
             const touch = e.touches[0];
-            // Only activate when chat is showing and touch starts in edge zone
             if (touch.clientX <= EDGE_ZONE) {
                 startX = touch.clientX;
                 startY = touch.clientY;
@@ -61,9 +94,8 @@ function App() {
             const deltaX = touch.clientX - startX;
             const deltaY = Math.abs(touch.clientY - startY);
 
-            // Must swipe right, far enough, and more horizontal than vertical
             if (deltaX > MIN_SWIPE && deltaX > deltaY * 1.5) {
-                handleBack();
+                handleBackButton(); // pops history + resets state
             }
             isEdgeSwipe = false;
         };
@@ -80,13 +112,13 @@ function App() {
                 el.removeEventListener('touchend', onTouchEnd);
             }
         };
-    }, [handleBack]);
+    }, [handleBackButton]);
 
     return (
         <Routes>
             {/* TODO: Add auth guard */}
             <Route path="/adminconfiguration" element={<AdminConfig />} />
-            <Route path="*" element={<ChatApp rootRef={rootRef} selectedChat={selectedChat} showMobileChat={showMobileChat} handleSelectChat={handleSelectChat} handleBack={handleBack} handleMessageSent={handleMessageSent} addOptimisticMessage={addOptimisticMessage} refetch={refetch} />} />
+            <Route path="*" element={<ChatApp rootRef={rootRef} selectedChat={selectedChat} showMobileChat={showMobileChat} handleSelectChat={handleSelectChat} handleBack={handleBackButton} handleMessageSent={handleMessageSent} addOptimisticMessage={addOptimisticMessage} refetch={refetch} />} />
         </Routes>
     );
 }
