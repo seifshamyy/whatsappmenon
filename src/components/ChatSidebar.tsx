@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, Plus, User, Tag as TagIcon, Bell, BellRing } from 'lucide-react';
+import { Search, Plus, User, Tag as TagIcon, Bell, BellRing, MessageSquare } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { WhatsAppMessage, ContactEbp, Tag, getContactId } from '../types';
 import { TagManager } from './TagManager';
@@ -22,19 +22,22 @@ interface ChatSidebarProps {
     selectedChat: string | null;
 }
 
-const READ_MESSAGES_KEY = 'portal_read_messages';
+// Per-contact "last read" timestamp.
+// Any incoming message with created_at > lastReadAt[contactId] is unread.
+// This never grows unboundedly — O(1) per contact regardless of message count.
+const READ_TS_KEY = 'portal_read_timestamps_v2';
 
-const loadReadMessages = (): Set<number> => {
+const loadReadTimestamps = (): Map<string, string> => {
     try {
-        const stored = localStorage.getItem(READ_MESSAGES_KEY);
-        if (stored) return new Set(JSON.parse(stored));
-    } catch (e) { console.error('Failed to load read messages:', e); }
-    return new Set();
+        const stored = localStorage.getItem(READ_TS_KEY);
+        if (stored) return new Map(Object.entries(JSON.parse(stored)));
+    } catch {}
+    return new Map();
 };
 
-const saveReadMessages = (ids: Set<number>) => {
-    try { localStorage.setItem(READ_MESSAGES_KEY, JSON.stringify([...ids])); }
-    catch (e) { console.error('Failed to save read messages:', e); }
+const saveReadTimestamps = (map: Map<string, string>) => {
+    try { localStorage.setItem(READ_TS_KEY, JSON.stringify(Object.fromEntries(map))); }
+    catch {}
 };
 
 const AVATAR_COLORS = [
@@ -69,8 +72,15 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
         typeof Notification !== 'undefined' && Notification.permission === 'granted'
     );
     const [loading, setLoading] = useState(true);
-    const [readMessages, setReadMessages] = useState<Set<number>>(() => loadReadMessages());
+    const [readTimestamps, setReadTimestamps] = useState<Map<string, string>>(() => loadReadTimestamps());
+    const [showUnreadOnly, setShowUnreadOnly] = useState(false);
     const [_contactsMap, setContactsMap] = useState<Map<string, ContactEbp>>(new Map());
+    // Ref so fetchContacts closure always sees the latest selected chat without re-creating
+    const selectedChatRef = useRef(selectedChat);
+    useEffect(() => { selectedChatRef.current = selectedChat; }, [selectedChat]);
+    // Ref so fetchContacts always reads the latest timestamps without being a dependency
+    const readTimestampsRef = useRef(readTimestamps);
+    useEffect(() => { readTimestampsRef.current = readTimestamps; }, [readTimestamps]);
     const [allTags, setAllTags] = useState<Tag[]>([]);
     const [tagManagerOpen, setTagManagerOpen] = useState(false);
     const [tagManagerContactId, setTagManagerContactId] = useState<string | undefined>();
@@ -147,29 +157,41 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
         }
 
         const contactMap = new Map<string, SidebarContact>();
+        // Group messages per contact to compute unread count accurately
+        const msgsByContact = new Map<string, WhatsAppMessage[]>();
 
         msgs.forEach((msg) => {
             const contactId = getContactId(msg);
             if (!contactId) return;
+            if (!msgsByContact.has(contactId)) msgsByContact.set(contactId, []);
+            msgsByContact.get(contactId)!.push(msg);
+        });
 
-            const isIncoming = msg.from && /^\d+$/.test(msg.from);
-            const isRead = readMessages.has(msg.id);
+        msgsByContact.forEach((contactMsgs, contactId) => {
+            // msgs are descending — first is newest
+            const newest = contactMsgs[0];
             const ebpContact = ebpMap.get(contactId);
 
-            if (!contactMap.has(contactId)) {
-                contactMap.set(contactId, {
-                    id: contactId,
-                    name: ebpContact?.name_WA || null,
-                    lastMessage: msg.text || (msg.type === 'audio' ? '🎤 Voice message' : '📷 Media'),
-                    lastMessageTime: msg.created_at,
-                    unreadCount: isIncoming && !isRead ? 1 : 0,
-                    tags: ebpContact?.tags || [],
-                    aiEnabled: ebpContact?.AI_replies === 'true',
-                });
-            } else if (isIncoming && !isRead) {
-                const existing = contactMap.get(contactId)!;
-                existing.unreadCount++;
-            }
+            // If this contact is currently open in the chat, treat all as read
+            const isActiveChat = selectedChatRef.current === contactId;
+            const lastReadAt = isActiveChat
+                ? new Date().toISOString()          // everything read
+                : (readTimestampsRef.current.get(contactId) ?? '1970-01-01T00:00:00.000Z');
+
+            const unreadCount = isActiveChat ? 0 : contactMsgs.filter(m => {
+                const isIncoming = m.from && /^\d+$/.test(m.from);
+                return isIncoming && m.created_at > lastReadAt;
+            }).length;
+
+            contactMap.set(contactId, {
+                id: contactId,
+                name: ebpContact?.name_WA || null,
+                lastMessage: newest.text || (newest.type === 'audio' ? '🎤 Voice message' : '📷 Media'),
+                lastMessageTime: newest.created_at,
+                unreadCount,
+                tags: ebpContact?.tags || [],
+                aiEnabled: ebpContact?.AI_replies === 'true',
+            });
         });
 
         const sortedContacts = Array.from(contactMap.values()).sort(
@@ -178,27 +200,28 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
 
         setContacts(sortedContacts);
         setLoading(false);
-    }, [readMessages]);
+    }, []);
 
+    // When a chat is opened: immediately record the current time as lastReadAt for
+    // that contact, zero out their badge in the sidebar, and persist to localStorage.
+    // No API call needed — timestamp comparison handles everything.
     useEffect(() => {
-        if (selectedChat) {
-            const markAsRead = async () => {
-                const { data } = await supabase
-                    .from(config.tableMessages)
-                    .select('id')
-                    .eq('from', selectedChat);
+        if (!selectedChat) return;
 
-                if (data) {
-                    setReadMessages(prev => {
-                        const next = new Set(prev);
-                        data.forEach((m: { id: number }) => next.add(m.id));
-                        saveReadMessages(next);
-                        return next;
-                    });
-                }
-            };
-            markAsRead();
-        }
+        const now = new Date().toISOString();
+
+        // 1. Persist timestamp
+        setReadTimestamps(prev => {
+            const next = new Map(prev);
+            next.set(selectedChat, now);
+            saveReadTimestamps(next);
+            return next;
+        });
+
+        // 2. Zero out badge instantly in existing contacts state (no refetch)
+        setContacts(prev =>
+            prev.map(c => c.id === selectedChat ? { ...c, unreadCount: 0 } : c)
+        );
     }, [selectedChat]);
 
     useEffect(() => {
@@ -272,23 +295,29 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
 
     const [selectedTagFilter, setSelectedTagFilter] = useState<number | null>(null);
 
-    const filteredContacts = contacts.filter((c) => {
-        // Text search: name, number, message, or tag name
-        const textMatch = !searchQuery || (
-            c.id.includes(searchQuery) ||
-            c.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            c.lastMessage?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (c.tags && c.tags.some(tagId => {
-                const tag = allTags.find(t => t.id === tagId);
-                return tag?.['tag name']?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false;
-            }))
-        );
+    const totalUnread = contacts.reduce((sum, c) => sum + c.unreadCount, 0);
 
-        // Tag chip filter
-        const tagMatch = !selectedTagFilter || (c.tags && c.tags.includes(selectedTagFilter));
-
-        return textMatch && tagMatch;
-    });
+    const filteredContacts = contacts
+        .filter((c) => {
+            const textMatch = !searchQuery || (
+                c.id.includes(searchQuery) ||
+                c.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                c.lastMessage?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                (c.tags && c.tags.some(tagId => {
+                    const tag = allTags.find(t => t.id === tagId);
+                    return tag?.['tag name']?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false;
+                }))
+            );
+            const tagMatch = !selectedTagFilter || (c.tags && c.tags.includes(selectedTagFilter));
+            const unreadMatch = !showUnreadOnly || c.unreadCount > 0;
+            return textMatch && tagMatch && unreadMatch;
+        })
+        // Unread contacts always float to the top, then sort by latest message time
+        .sort((a, b) => {
+            if (a.unreadCount > 0 && b.unreadCount === 0) return -1;
+            if (b.unreadCount > 0 && a.unreadCount === 0) return 1;
+            return new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime();
+        });
 
     const formatTime = (timestamp: string) => {
         try {
@@ -363,20 +392,56 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
 
                 {/* Search */}
                 <div className="p-2 sm:p-3 flex-shrink-0 bg-slate-50/50">
-                    <div className="relative">
-                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                        <input
-                            type="text"
-                            placeholder="Search chats..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full bg-white border border-slate-200 rounded-lg py-2 pl-9 pr-3 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
-                        />
+                    <div className="flex items-center gap-2">
+                        <div className="relative flex-1">
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <input
+                                type="text"
+                                placeholder="Search chats..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="w-full bg-white border border-slate-200 rounded-lg py-2 pl-9 pr-3 text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
+                            />
+                        </div>
+                        {/* Unread filter toggle */}
+                        <button
+                            onClick={() => setShowUnreadOnly(v => !v)}
+                            title={showUnreadOnly ? 'Show all chats' : 'Show unread only'}
+                            className="relative flex-shrink-0 p-2 rounded-lg border transition-all"
+                            style={showUnreadOnly ? {
+                                backgroundColor: 'var(--color-accent)',
+                                borderColor: 'var(--color-accent)',
+                                color: '#fff',
+                            } : {
+                                backgroundColor: '#fff',
+                                borderColor: '#e2e8f0',
+                                color: '#94a3b8',
+                            }}
+                        >
+                            <MessageSquare size={16} />
+                            {totalUnread > 0 && !showUnreadOnly && (
+                                <span
+                                    className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full text-white text-[9px] font-bold flex items-center justify-center"
+                                    style={{ backgroundColor: 'var(--color-accent)' }}
+                                >
+                                    {totalUnread > 99 ? '99+' : totalUnread}
+                                </span>
+                            )}
+                        </button>
                     </div>
 
-                    {/* Tag Filter Chips */}
-                    {allTags.length > 0 && (
+                    {/* Filter chips row: Unread label + tag chips */}
+                    {(showUnreadOnly || allTags.length > 0) && (
                         <div className="flex gap-1.5 mt-2 overflow-x-auto pb-1 scrollbar-hide">
+                            {showUnreadOnly && (
+                                <button
+                                    onClick={() => setShowUnreadOnly(false)}
+                                    className="flex-shrink-0 px-2.5 py-1 rounded-full text-[10px] font-semibold text-white flex items-center gap-1"
+                                    style={{ backgroundColor: 'var(--color-accent)' }}
+                                >
+                                    Unread {totalUnread > 0 ? `(${totalUnread})` : ''} ×
+                                </button>
+                            )}
                             {allTags.map(tag => (
                                 <button
                                     key={tag.id}
