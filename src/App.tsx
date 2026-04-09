@@ -65,11 +65,13 @@ function App() {
         }
     };
 
-    // Pure state reset — does NOT touch history (called by popstate handler too)
+    // Pure state reset — does NOT touch history (called by popstate handler too).
+    // selectedChat is cleared AFTER the slide animation finishes (220ms) so the
+    // NeuralFeed stays mounted and visible during the back-slide — no content flicker.
     const handleBack = useCallback(() => {
         setShowMobileChat(false);
-        setSelectedChat(null);
         setContactId(null);
+        setTimeout(() => setSelectedChat(null), 230);
     }, [setContactId]);
 
     // Used by in-app back button and swipe gesture.

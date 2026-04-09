@@ -493,16 +493,14 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                                 <button
                                     key={contact.id}
                                     onClick={() => onSelectChat(contact.id)}
-                                    className={`w-full p-2.5 sm:p-3 flex items-center gap-3 transition-all cursor-pointer border-l-2 select-none
-                                        active:scale-[0.98] active:opacity-80
-                                        ${selectedChat === contact.id
-                                        ? ''
-                                        : 'hover:bg-slate-50 border-transparent'
-                                        }`}
-                                    style={selectedChat === contact.id ? {
-                                        backgroundColor: `${config.colorPrimary}18`,
-                                        borderColor: config.colorPrimary,
-                                    } : undefined}
+                                    className="w-full p-2.5 sm:p-3 flex items-center gap-3 transition-all cursor-pointer border-l-2 select-none active:scale-[0.98] active:opacity-80"
+                                    style={
+                                        selectedChat === contact.id
+                                            ? { backgroundColor: `${config.colorPrimary}18`, borderColor: config.colorPrimary }
+                                            : contact.unreadCount > 0
+                                                ? { backgroundColor: `${config.colorAccent}08`, borderColor: config.colorAccent }
+                                                : { borderColor: 'transparent' }
+                                    }
                                 >
                                     {/* Avatar */}
                                     <div className="relative flex-shrink-0">
