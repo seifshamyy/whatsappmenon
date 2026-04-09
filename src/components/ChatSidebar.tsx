@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, Plus, User, Tag as TagIcon, Bell, BellRing, MessageSquare } from 'lucide-react';
+import { Search, User, Tag as TagIcon, Bell, BellRing, MessageSquare, CheckCheck } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { WhatsAppMessage, ContactEbp, Tag, getContactId } from '../types';
 import { TagManager } from './TagManager';
@@ -12,6 +12,7 @@ interface SidebarContact {
     name: string | null;
     lastMessage: string;
     lastMessageTime: string;
+    lastMessageIsOutgoing: boolean;
     unreadCount: number;
     tags: number[];
     aiEnabled: boolean;
@@ -172,6 +173,7 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                 name: ebpContact?.name_WA || null,
                 lastMessage: newest.text || (newest.type === 'audio' ? '🎤 Voice message' : '📷 Media'),
                 lastMessageTime: newest.created_at,
+                lastMessageIsOutgoing: lastMsgIsOutgoing,
                 unreadCount,
                 tags: ebpContact?.tags || [],
                 aiEnabled: ebpContact?.AI_replies === 'true',
@@ -253,6 +255,7 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                                         ...c,
                                         lastMessage: preview,
                                         lastMessageTime: msg.created_at,
+                                        lastMessageIsOutgoing: isOutgoing,
                                         // Outgoing message clears the unread badge (we sent last = we've seen it)
                                         unreadCount: isOutgoing ? 0 : isUnread ? c.unreadCount + 1 : c.unreadCount,
                                     } : c);
@@ -407,9 +410,6 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                         <button onClick={openTagManagerGlobal} className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-[var(--color-primary)] transition-colors" title="Manage Tags">
                             <TagIcon size={16} />
                         </button>
-                        <button className="p-1.5 sm:p-2 rounded-full hover:bg-slate-100 text-[var(--color-primary)] transition-colors">
-                            <Plus size={18} />
-                        </button>
                     </div>
                 </div>
 
@@ -527,16 +527,19 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                                 <button
                                     key={contact.id}
                                     onClick={() => onSelectChat(contact.id)}
-                                    className="mx-2 my-1 p-2.5 sm:p-3 flex items-center gap-3 transition-all cursor-pointer rounded-xl border select-none active:scale-[0.98] active:opacity-80"
+                                    className="mx-2 my-1 p-2.5 sm:p-3 flex items-center gap-3 transition-all cursor-pointer rounded-xl select-none active:scale-[0.98] active:opacity-80"
                                     style={{
                                         width: 'calc(100% - 1rem)',
-                                        ...(
-                                            selectedChat === contact.id
-                                                ? { backgroundColor: `${config.colorPrimary}18`, borderColor: `${config.colorPrimary}40` }
-                                                : contact.unreadCount > 0
-                                                    ? { backgroundColor: `${config.colorAccent}14`, borderColor: `${config.colorAccent}30` }
-                                                    : { backgroundColor: '#f8fafc', borderColor: '#d1d9e0' }
-                                        )
+                                        border: selectedChat === contact.id
+                                            ? `2px solid ${config.colorPrimary}50`
+                                            : contact.unreadCount > 0
+                                                ? `2px solid ${config.colorAccent}40`
+                                                : '2px solid #c8d0d8',
+                                        backgroundColor: selectedChat === contact.id
+                                            ? `${config.colorPrimary}18`
+                                            : contact.unreadCount > 0
+                                                ? `${config.colorAccent}14`
+                                                : '#f8fafc',
                                     }}
                                 >
                                     {/* Avatar */}
@@ -567,8 +570,11 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                                             </span>
                                         </div>
                                         <div className="flex items-center justify-between gap-2">
-                                            <p className={`text-xs truncate flex-1 text-left ${contact.unreadCount > 0 && selectedChat !== contact.id ? 'text-slate-900 font-medium' : 'text-slate-500'}`}>
-                                                {contact.lastMessage}
+                                            <p className={`text-xs truncate flex-1 text-left flex items-center gap-1 ${contact.unreadCount > 0 && selectedChat !== contact.id ? 'text-slate-900 font-medium' : 'text-slate-500'}`}>
+                                                {contact.lastMessageIsOutgoing && (
+                                                    <CheckCheck size={12} className="flex-shrink-0" style={{ color: 'var(--color-primary)', opacity: 0.7 }} />
+                                                )}
+                                                <span className="truncate">{contact.lastMessage}</span>
                                             </p>
                                         </div>
                                         {/* Tags Display + Assign Button */}
