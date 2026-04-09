@@ -531,10 +531,10 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                                     style={{
                                         width: 'calc(100% - 1rem)',
                                         border: selectedChat === contact.id
-                                            ? `2px solid ${config.colorPrimary}50`
+                                            ? `1.5px solid ${config.colorPrimary}50`
                                             : contact.unreadCount > 0
-                                                ? `2px solid ${config.colorAccent}40`
-                                                : '2px solid #c8d0d8',
+                                                ? `1.5px solid ${config.colorAccent}40`
+                                                : '1.5px solid #c8d0d8',
                                         backgroundColor: selectedChat === contact.id
                                             ? `${config.colorPrimary}18`
                                             : contact.unreadCount > 0
