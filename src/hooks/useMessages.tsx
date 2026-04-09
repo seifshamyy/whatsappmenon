@@ -34,6 +34,10 @@ export const MessagesProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // Ref holds the current contact ID so the singleton channel
     // and resilience callbacks always use the latest value.
     const contactIdRef = useRef<string | null>(null);
+    // Monotonically increasing counter — each new fetch gets a version number.
+    // When a fetch completes, it checks if it's still the latest. Stale responses
+    // (from rapid chat switching) are discarded, preventing state corruption.
+    const fetchVersionRef = useRef(0);
 
     const fetchMessages = useCallback(async (forContactId?: string | null) => {
         const id = forContactId !== undefined ? forContactId : contactIdRef.current;
@@ -44,6 +48,8 @@ export const MessagesProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             setLoading(false);
             return;
         }
+
+        const version = ++fetchVersionRef.current;
 
         try {
             // Do NOT setLoading(true) here — background refetches must not
@@ -60,13 +66,17 @@ export const MessagesProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 .or(`from.eq.${id},to.eq.${id}`)
                 .order('created_at', { ascending: true });
 
+            // Discard stale response — a newer fetch has already taken over
+            if (fetchVersionRef.current !== version) return;
+
             if (fetchError) throw fetchError;
             setMessagesRef.current((data ?? []) as WhatsAppMessage[]);
         } catch (err: unknown) {
+            if (fetchVersionRef.current !== version) return;
             console.error('Fetch error:', err);
             setError(err instanceof Error ? err.message : 'Unknown error');
         } finally {
-            setLoading(false);
+            if (fetchVersionRef.current === version) setLoading(false);
         }
     }, []);
 

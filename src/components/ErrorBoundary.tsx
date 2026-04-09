@@ -7,28 +7,19 @@ interface Props {
 interface State {
     error: Error | null;
     errorInfo: ErrorInfo | null;
-    asyncError: string | null;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
-    state: State = { error: null, errorInfo: null, asyncError: null };
+    state: State = { error: null, errorInfo: null };
 
     private onError = (event: ErrorEvent) => {
+        // Log only — don't show in UI, global errors include WebSocket noise
+        // from Supabase/extensions that shouldn't replace the app UI.
         console.error('[GlobalError]', event.error ?? event.message);
-        this.setState(prev => ({
-            asyncError: prev.asyncError
-                ? prev.asyncError + '\n' + (event.error?.toString() ?? event.message)
-                : (event.error?.toString() ?? event.message)
-        }));
     };
 
     private onUnhandledRejection = (event: PromiseRejectionEvent) => {
         console.error('[UnhandledRejection]', event.reason);
-        this.setState(prev => ({
-            asyncError: prev.asyncError
-                ? prev.asyncError + '\n' + String(event.reason)
-                : String(event.reason)
-        }));
     };
 
     componentDidMount() {
@@ -47,8 +38,8 @@ export class ErrorBoundary extends Component<Props, State> {
     }
 
     render() {
-        const { error, errorInfo, asyncError } = this.state;
-        if (!error && !asyncError) return this.props.children;
+        const { error, errorInfo } = this.state;
+        if (!error) return this.props.children;
 
         return (
             <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
@@ -59,23 +50,12 @@ export class ErrorBoundary extends Component<Props, State> {
                     </div>
 
                     <div className="p-5 space-y-4">
-                        {error && (
-                            <div>
-                                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Error</p>
-                                <p className="text-sm font-mono text-red-600 bg-red-50 rounded-lg px-3 py-2 break-words">
-                                    {error.toString()}
-                                </p>
-                            </div>
-                        )}
-
-                        {asyncError && (
-                            <div>
-                                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Async Error</p>
-                                <pre className="text-sm font-mono text-red-600 bg-red-50 rounded-lg px-3 py-2 break-words whitespace-pre-wrap">
-                                    {asyncError}
-                                </pre>
-                            </div>
-                        )}
+                        <div>
+                            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Error</p>
+                            <p className="text-sm font-mono text-red-600 bg-red-50 rounded-lg px-3 py-2 break-words">
+                                {error.toString()}
+                            </p>
+                        </div>
 
                         {errorInfo && (
                             <div>

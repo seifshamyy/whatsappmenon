@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, Component } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { ChatSidebar } from './components/ChatSidebar';
 import { ChatHeader } from './components/ChatHeader';
@@ -8,6 +8,44 @@ import { AdminConfig } from './pages/AdminConfig';
 import { useMessages } from './hooks/useMessages';
 import { useConfig } from './context/ConfigContext';
 import { registerServiceWorker } from './lib/pushNotifications';
+
+// Local error boundary scoped to the chat feed area.
+// If NeuralFeed crashes (bad message data, render error) this shows an
+// inline error + retry instead of leaving the chat area silently white.
+class ChatFeedBoundary extends Component<
+    { children: React.ReactNode; chatKey: string },
+    { error: Error | null }
+> {
+    state = { error: null };
+    static getDerivedStateFromError(error: Error) { return { error }; }
+    componentDidCatch(error: Error) { console.error('[ChatFeedBoundary]', error); }
+    // Reset when the selected chat changes so switching contacts retries
+    componentDidUpdate(prev: { chatKey: string }) {
+        if (prev.chatKey !== this.props.chatKey && this.state.error) {
+            this.setState({ error: null });
+        }
+    }
+    render() {
+        if (this.state.error) {
+            return (
+                <div className="flex-1 flex items-center justify-center px-6" style={{ backgroundColor: 'var(--color-chat-bg)' }}>
+                    <div className="text-center bg-white rounded-2xl border border-red-100 shadow-sm px-6 py-8 max-w-xs w-full">
+                        <p className="text-red-500 font-semibold text-sm mb-1">Chat failed to load</p>
+                        <p className="text-slate-400 text-xs mb-4 font-mono break-words">{this.state.error.message}</p>
+                        <button
+                            onClick={() => this.setState({ error: null })}
+                            className="px-4 py-2 rounded-xl text-white text-sm font-semibold"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                        >
+                            Retry
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
 
 function App() {
     const [selectedChat, setSelectedChat] = useState<string | null>(null);
@@ -236,7 +274,9 @@ function ChatApp({ rootRef, selectedChat, showMobileChat, handleSelectChat, hand
                                 showBackButton={true}
                                 onChatDeleted={refetch}
                             />
-                            <NeuralFeed key={selectedChat} selectedChat={selectedChat} />
+                            <ChatFeedBoundary chatKey={selectedChat}>
+                                <NeuralFeed key={selectedChat} selectedChat={selectedChat} />
+                            </ChatFeedBoundary>
                             <OutboundHub
                                 recipientId={selectedChat}
                                 onMessageSent={handleMessageSent}
