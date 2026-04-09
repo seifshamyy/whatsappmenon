@@ -157,7 +157,11 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                 ? new Date().toISOString()          // everything read
                 : (readTimestampsRef.current.get(contactId) ?? '1970-01-01T00:00:00.000Z');
 
-            const unreadCount = isActiveChat ? 0 : contactMsgs.filter(m => {
+            // If the last message was sent by us, treat the whole conversation as read —
+            // same logic as native WhatsApp (you sent last = you've seen everything).
+            const lastMsgIsOutgoing = !newest.from || !/^\d+$/.test(newest.from);
+
+            const unreadCount = (isActiveChat || lastMsgIsOutgoing) ? 0 : contactMsgs.filter(m => {
                 const isIncoming = m.from && /^\d+$/.test(m.from);
                 return isIncoming && m.created_at > lastReadAt;
             }).length;
@@ -235,6 +239,7 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                             if (!contactId) return;
 
                             const isIncoming = msg.from && /^\d+$/.test(msg.from);
+                            const isOutgoing = !isIncoming;
                             const isActive = selectedChatRef.current === contactId;
                             const lastReadAt = readTimestampsRef.current.get(contactId) ?? '1970-01-01T00:00:00.000Z';
                             const isUnread = isIncoming && !isActive && msg.created_at > lastReadAt;
@@ -247,7 +252,8 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                                         ...c,
                                         lastMessage: preview,
                                         lastMessageTime: msg.created_at,
-                                        unreadCount: isUnread ? c.unreadCount + 1 : c.unreadCount,
+                                        // Outgoing message clears the unread badge (we sent last = we've seen it)
+                                        unreadCount: isOutgoing ? 0 : isUnread ? c.unreadCount + 1 : c.unreadCount,
                                     } : c);
                                 }
                                 // Brand-new contact — do a full refetch to get their name/tags
