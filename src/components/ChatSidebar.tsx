@@ -327,10 +327,10 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
             const unreadMatch = !showUnreadOnly || c.unreadCount > 0;
             return textMatch && tagMatch && unreadMatch;
         })
-        // Unread contacts always float to the top, then sort by latest message time
+        // Sort purely by last message time — same as native WhatsApp.
+        // Unread chats stay in their chronological position; only the visual
+        // treatment (badge, bold, tint, border) distinguishes them.
         .sort((a, b) => {
-            if (a.unreadCount > 0 && b.unreadCount === 0) return -1;
-            if (b.unreadCount > 0 && a.unreadCount === 0) return 1;
             return new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime();
         });
 
