@@ -535,7 +535,7 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                                                 ? { backgroundColor: `${config.colorPrimary}18`, borderColor: `${config.colorPrimary}40` }
                                                 : contact.unreadCount > 0
                                                     ? { backgroundColor: `${config.colorAccent}14`, borderColor: `${config.colorAccent}30` }
-                                                    : { backgroundColor: '#f8fafc', borderColor: '#e9edf2' }
+                                                    : { backgroundColor: '#f8fafc', borderColor: '#d1d9e0' }
                                         )
                                     }}
                                 >
