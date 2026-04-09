@@ -16,6 +16,10 @@ function App() {
     const rootRef = useRef<HTMLDivElement>(null);
     // Ref so the popstate listener always reads the latest value without re-subscribing
     const showMobileChatRef = useRef(false);
+    // Guard: prevent handleBack from firing more than once per navigation.
+    // Without this, swipe + hardware-back racing or double-tap causes two
+    // setContactId(null) calls which can freeze the app.
+    const isNavigatingBackRef = useRef(false);
 
     useEffect(() => {
         showMobileChatRef.current = showMobileChat;
@@ -69,6 +73,10 @@ function App() {
     // selectedChat is cleared AFTER the slide animation finishes (220ms) so the
     // NeuralFeed stays mounted and visible during the back-slide — no content flicker.
     const handleBack = useCallback(() => {
+        // Guard: if already navigating back (e.g. swipe + hardware-back racing),
+        // drop the second call entirely — double setContactId(null) freezes the app.
+        if (isNavigatingBackRef.current) return;
+        isNavigatingBackRef.current = true;
         setShowMobileChat(false);
         // Delay ALL state teardown until after the slide animation (220ms).
         // setContactId(null) clears messages → NeuralFeed re-renders → layout work
@@ -76,6 +84,7 @@ function App() {
         setTimeout(() => {
             setSelectedChat(null);
             setContactId(null);
+            isNavigatingBackRef.current = false;
         }, 230);
     }, [setContactId]);
 

@@ -74,6 +74,7 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
     const [loading, setLoading] = useState(true);
     const [readTimestamps, setReadTimestamps] = useState<Map<string, string>>(() => loadReadTimestamps());
     const [showUnreadOnly, setShowUnreadOnly] = useState(false);
+    const [showAiOffOnly, setShowAiOffOnly] = useState(false);
     const [_contactsMap, setContactsMap] = useState<Map<string, ContactEbp>>(new Map());
     // Ref so fetchContacts closure always sees the latest selected chat without re-creating
     const selectedChatRef = useRef(selectedChat);
@@ -331,7 +332,8 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
             );
             const tagMatch = !selectedTagFilter || (c.tags && c.tags.includes(selectedTagFilter));
             const unreadMatch = !showUnreadOnly || c.unreadCount > 0;
-            return textMatch && tagMatch && unreadMatch;
+            const aiOffMatch = !showAiOffOnly || !c.aiEnabled;
+            return textMatch && tagMatch && unreadMatch && aiOffMatch;
         })
         // Sort purely by last message time — same as native WhatsApp.
         // Unread chats stay in their chronological position; only the visual
@@ -449,10 +451,27 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                                 </span>
                             )}
                         </button>
+                        {/* AI Off filter toggle */}
+                        <button
+                            onClick={() => setShowAiOffOnly(v => !v)}
+                            title={showAiOffOnly ? 'Show all chats' : 'Show AI-off contacts only'}
+                            className="flex-shrink-0 p-2 rounded-lg border transition-all text-[10px] font-bold leading-none"
+                            style={showAiOffOnly ? {
+                                backgroundColor: '#64748b',
+                                borderColor: '#64748b',
+                                color: '#fff',
+                            } : {
+                                backgroundColor: '#fff',
+                                borderColor: '#e2e8f0',
+                                color: '#94a3b8',
+                            }}
+                        >
+                            AI
+                        </button>
                     </div>
 
-                    {/* Filter chips row: Unread label + tag chips */}
-                    {(showUnreadOnly || allTags.length > 0) && (
+                    {/* Filter chips row: Unread label + AI Off + tag chips */}
+                    {(showUnreadOnly || showAiOffOnly || allTags.length > 0) && (
                         <div className="flex gap-1.5 mt-2 overflow-x-auto pb-1 scrollbar-hide">
                             {showUnreadOnly && (
                                 <button
@@ -461,6 +480,15 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                                     style={{ backgroundColor: 'var(--color-accent)' }}
                                 >
                                     Unread {totalUnreadChats > 0 ? `(${totalUnreadChats})` : ''} ×
+                                </button>
+                            )}
+                            {showAiOffOnly && (
+                                <button
+                                    onClick={() => setShowAiOffOnly(false)}
+                                    className="flex-shrink-0 px-2.5 py-1 rounded-full text-[10px] font-semibold text-white flex items-center gap-1"
+                                    style={{ backgroundColor: '#64748b' }}
+                                >
+                                    AI Off ×
                                 </button>
                             )}
                             {allTags.map(tag => (
@@ -518,14 +546,6 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                                         >
                                             {contact.name?.[0]?.toUpperCase() || <User size={18} />}
                                         </div>
-                                        {/* AI Status Dot */}
-                                        <div
-                                            className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${contact.aiEnabled ? 'bg-green-500' : 'bg-red-500'}`}
-                                            title={contact.aiEnabled ? 'AI Active' : 'AI Inactive'}
-                                        >
-                                            <div className={`absolute inset-0 rounded-full animate-ping opacity-75 ${contact.aiEnabled ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                                        </div>
-
                                         {contact.unreadCount > 0 && selectedChat !== contact.id && (
                                             <div className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-white text-[10px] font-bold flex items-center justify-center shadow-sm z-10" style={{ backgroundColor: 'var(--color-accent)' }}>
                                                 {contact.unreadCount}
