@@ -107,9 +107,12 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
     const fetchContacts = useCallback(async () => {
         const PAGE_SIZE = 1000;
 
-        // Phase 1: recent messages (unread counts + previews for active contacts)
-        // + full contacts list in parallel.
-        const [page1, page2, ebpResult] = await Promise.all([
+        // Three parallel fetches:
+        // 1. RPC → last message per contact (replaces N+1 queries, covers ALL contacts)
+        // 2. Recent messages × 2 pages → unread count computation only
+        // 3. contacts.ebp → names, tags, AI flag
+        const [rpcResult, page1, page2, ebpResult] = await Promise.all([
+            supabase.rpc('get_last_messages_per_contact'),
             supabase
                 .from(config.tableMessages)
                 .select('id, from, to, text, type, created_at')
@@ -123,91 +126,67 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
             supabase.from(config.tableContacts).select('*'),
         ]);
 
-        const msgs: WhatsAppMessage[] = [
-            ...((page1.data ?? []) as WhatsAppMessage[]),
-            ...((page2.data ?? []) as WhatsAppMessage[]),
-        ];
-
-        // Build contacts lookup
+        // Contact metadata
         const ebpMap = new Map<string, ContactEbp>();
         if (ebpResult.data) {
             (ebpResult.data as ContactEbp[]).forEach(c => ebpMap.set(String(c.id), c));
             setContactsMap(ebpMap);
         }
 
-        // Group recent messages per contact
-        const msgsByContact = new Map<string, WhatsAppMessage[]>();
-        msgs.forEach((msg) => {
-            const contactId = getContactId(msg);
-            if (!contactId) return;
-            if (!msgsByContact.has(contactId)) msgsByContact.set(contactId, []);
-            msgsByContact.get(contactId)!.push(msg);
-        });
-
-        // Phase 2: for contacts not covered by the recent window, fetch their
-        // last message individually. These are small limit-1 queries fired in parallel.
-        const staleIds = Array.from(ebpMap.keys()).filter(id => !msgsByContact.has(id));
-        if (staleIds.length > 0) {
-            const staleResults = await Promise.allSettled(
-                staleIds.map(id =>
-                    supabase
-                        .from(config.tableMessages)
-                        .select('id, from, to, text, type, created_at')
-                        .or(`from.eq.${id},to.eq.${id}`)
-                        .order('created_at', { ascending: false })
-                        .limit(1)
-                )
-            );
-            staleResults.forEach((result, i) => {
-                if (result.status === 'fulfilled' && result.value.data?.length) {
-                    const msg = result.value.data[0] as WhatsAppMessage;
-                    msgsByContact.set(staleIds[i], [msg]);
-                }
+        // Last message per contact from RPC — one row per contact, zero extra queries
+        const lastMsgByContact = new Map<string, WhatsAppMessage>();
+        if (rpcResult.data) {
+            (rpcResult.data as WhatsAppMessage[]).forEach(msg => {
+                const contactId = getContactId(msg);
+                if (contactId) lastMsgByContact.set(contactId, msg);
             });
         }
 
-        const contactMap = new Map<string, SidebarContact>();
-
-        // Seed every contact from the contacts table
-        ebpMap.forEach((ebpContact, contactId) => {
-            contactMap.set(contactId, {
-                id: contactId,
-                name: ebpContact.name_WA || null,
-                lastMessage: '',
-                lastMessageTime: '1970-01-01T00:00:00.000Z',
-                lastMessageIsOutgoing: false,
-                unreadCount: 0,
-                tags: ebpContact.tags || [],
-                aiEnabled: ebpContact.AI_replies === 'true',
-            });
+        // Recent messages grouped per contact — for unread count only
+        const recentByContact = new Map<string, WhatsAppMessage[]>();
+        const recentMsgs: WhatsAppMessage[] = [
+            ...((page1.data ?? []) as WhatsAppMessage[]),
+            ...((page2.data ?? []) as WhatsAppMessage[]),
+        ];
+        recentMsgs.forEach(msg => {
+            const contactId = getContactId(msg);
+            if (!contactId) return;
+            if (!recentByContact.has(contactId)) recentByContact.set(contactId, []);
+            recentByContact.get(contactId)!.push(msg);
         });
 
-        // Overlay message data for all contacts that have messages
-        msgsByContact.forEach((contactMsgs, contactId) => {
-            const newest = contactMsgs[0];
-            const ebpContact = ebpMap.get(contactId);
+        const contactMap = new Map<string, SidebarContact>();
+
+        ebpMap.forEach((ebpContact, contactId) => {
+            const lastMsg = lastMsgByContact.get(contactId);
+            const recentMsgsForContact = recentByContact.get(contactId) ?? [];
 
             const isActiveChat = selectedChatRef.current === contactId;
             const lastReadAt = isActiveChat
                 ? new Date().toISOString()
                 : (readTimestampsRef.current.get(contactId) ?? '1970-01-01T00:00:00.000Z');
 
-            const lastMsgIsOutgoing = !newest.from || !/^\d+$/.test(newest.from);
+            const lastMsgIsOutgoing = lastMsg
+                ? (!lastMsg.from || !/^\d+$/.test(lastMsg.from))
+                : false;
 
-            const unreadCount = (isActiveChat || lastMsgIsOutgoing) ? 0 : contactMsgs.filter(m => {
-                const isIncoming = m.from && /^\d+$/.test(m.from);
-                return isIncoming && m.created_at > lastReadAt;
-            }).length;
+            const unreadCount = (isActiveChat || lastMsgIsOutgoing) ? 0
+                : recentMsgsForContact.filter(m => {
+                    const isIncoming = m.from && /^\d+$/.test(m.from);
+                    return isIncoming && m.created_at > lastReadAt;
+                }).length;
 
             contactMap.set(contactId, {
                 id: contactId,
-                name: ebpContact?.name_WA || null,
-                lastMessage: newest.text || (newest.type === 'audio' ? '🎤 Voice message' : '📷 Media'),
-                lastMessageTime: newest.created_at,
+                name: ebpContact.name_WA || null,
+                lastMessage: lastMsg
+                    ? (lastMsg.text || (lastMsg.type === 'audio' ? '🎤 Voice message' : '📷 Media'))
+                    : '',
+                lastMessageTime: lastMsg?.created_at ?? '1970-01-01T00:00:00.000Z',
                 lastMessageIsOutgoing: lastMsgIsOutgoing,
                 unreadCount,
-                tags: ebpContact?.tags || [],
-                aiEnabled: ebpContact?.AI_replies === 'true',
+                tags: ebpContact.tags || [],
+                aiEnabled: ebpContact.AI_replies === 'true',
             });
         });
 
