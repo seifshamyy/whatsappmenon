@@ -73,6 +73,9 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
         typeof Notification !== 'undefined' && Notification.permission === 'granted'
     );
     const [loading, setLoading] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [hasMore, setHasMore] = useState(false);
+    const [contactPage, setContactPage] = useState(0);
     const [readTimestamps, setReadTimestamps] = useState<Map<string, string>>(() => loadReadTimestamps());
     const [showUnreadOnly, setShowUnreadOnly] = useState(false);
     const [showAiOffOnly, setShowAiOffOnly] = useState(false);
@@ -104,61 +107,19 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
         }
     }, []);
 
-    const fetchContacts = useCallback(async () => {
-        const PAGE_SIZE = 1000;
+    const CONTACTS_PAGE_SIZE = 30;
+    const RECENT_MSGS_SIZE = 1000;
 
-        // Three parallel fetches:
-        // 1. RPC → last message per contact (replaces N+1 queries, covers ALL contacts)
-        // 2. Recent messages × 2 pages → unread count computation only
-        // 3. contacts.ebp → names, tags, AI flag
-        const [rpcResult, page1, page2, ebpResult] = await Promise.all([
-            supabase.rpc('get_last_messages_per_contact'),
-            supabase
-                .from(config.tableMessages)
-                .select('id, from, to, text, type, created_at')
-                .order('created_at', { ascending: false })
-                .range(0, PAGE_SIZE - 1),
-            supabase
-                .from(config.tableMessages)
-                .select('id, from, to, text, type, created_at')
-                .order('created_at', { ascending: false })
-                .range(PAGE_SIZE, PAGE_SIZE * 2 - 1),
-            supabase.from(config.tableContacts).select('*'),
-        ]);
-
-        // Contact metadata
-        const ebpMap = new Map<string, ContactEbp>();
-        if (ebpResult.data) {
-            (ebpResult.data as ContactEbp[]).forEach(c => ebpMap.set(String(c.id), c));
-            setContactsMap(ebpMap);
-        }
-
-        // Last message per contact from RPC — one row per contact, zero extra queries
-        const lastMsgByContact = new Map<string, WhatsAppMessage>();
-        if (rpcResult.data) {
-            (rpcResult.data as WhatsAppMessage[]).forEach(msg => {
-                const contactId = getContactId(msg);
-                if (contactId) lastMsgByContact.set(contactId, msg);
-            });
-        }
-
-        // Recent messages grouped per contact — for unread count only
-        const recentByContact = new Map<string, WhatsAppMessage[]>();
-        const recentMsgs: WhatsAppMessage[] = [
-            ...((page1.data ?? []) as WhatsAppMessage[]),
-            ...((page2.data ?? []) as WhatsAppMessage[]),
-        ];
-        recentMsgs.forEach(msg => {
-            const contactId = getContactId(msg);
-            if (!contactId) return;
-            if (!recentByContact.has(contactId)) recentByContact.set(contactId, []);
-            recentByContact.get(contactId)!.push(msg);
-        });
-
-        const contactMap = new Map<string, SidebarContact>();
-
-        ebpMap.forEach((ebpContact, contactId) => {
-            const lastMsg = lastMsgByContact.get(contactId);
+    // Shared helper: build SidebarContact from RPC rows + ebp metadata + recent msgs
+    const buildContacts = useCallback((
+        rpcRows: WhatsAppMessage[],
+        ebpMap: Map<string, ContactEbp>,
+        recentByContact: Map<string, WhatsAppMessage[]>
+    ): SidebarContact[] => {
+        return rpcRows.map(lastMsg => {
+            const contactId = getContactId(lastMsg);
+            if (!contactId) return null;
+            const ebpContact = ebpMap.get(contactId);
             const recentMsgsForContact = recentByContact.get(contactId) ?? [];
 
             const isActiveChat = selectedChatRef.current === contactId;
@@ -166,9 +127,7 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                 ? new Date().toISOString()
                 : (readTimestampsRef.current.get(contactId) ?? '1970-01-01T00:00:00.000Z');
 
-            const lastMsgIsOutgoing = lastMsg
-                ? (!lastMsg.from || !/^\d+$/.test(lastMsg.from))
-                : false;
+            const lastMsgIsOutgoing = !lastMsg.from || !/^\d+$/.test(lastMsg.from);
 
             const unreadCount = (isActiveChat || lastMsgIsOutgoing) ? 0
                 : recentMsgsForContact.filter(m => {
@@ -176,27 +135,81 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                     return isIncoming && m.created_at > lastReadAt;
                 }).length;
 
-            contactMap.set(contactId, {
+            return {
                 id: contactId,
-                name: ebpContact.name_WA || null,
-                lastMessage: lastMsg
-                    ? (lastMsg.text || (lastMsg.type === 'audio' ? '🎤 Voice message' : '📷 Media'))
-                    : '',
-                lastMessageTime: lastMsg?.created_at ?? '1970-01-01T00:00:00.000Z',
+                name: ebpContact?.name_WA || null,
+                lastMessage: lastMsg.text || (lastMsg.type === 'audio' ? '🎤 Voice message' : '📷 Media'),
+                lastMessageTime: lastMsg.created_at,
                 lastMessageIsOutgoing: lastMsgIsOutgoing,
                 unreadCount,
-                tags: ebpContact.tags || [],
-                aiEnabled: ebpContact.AI_replies === 'true',
-            });
+                tags: ebpContact?.tags || [],
+                aiEnabled: ebpContact?.AI_replies === 'true',
+            } satisfies SidebarContact;
+        }).filter(Boolean) as SidebarContact[];
+    }, []);
+
+    const fetchContacts = useCallback(async () => {
+        const [rpcResult, recentResult, ebpResult] = await Promise.all([
+            supabase.rpc('get_last_messages_per_contact', {
+                p_table: config.tableMessages,
+                page_limit: CONTACTS_PAGE_SIZE,
+                page_offset: 0,
+            }),
+            supabase
+                .from(config.tableMessages)
+                .select('id, from, to, text, type, created_at')
+                .order('created_at', { ascending: false })
+                .range(0, RECENT_MSGS_SIZE - 1),
+            supabase.from(config.tableContacts).select('*'),
+        ]);
+
+        const ebpMap = new Map<string, ContactEbp>();
+        if (ebpResult.data) {
+            (ebpResult.data as ContactEbp[]).forEach(c => ebpMap.set(String(c.id), c));
+            setContactsMap(ebpMap);
+        }
+
+        const recentByContact = new Map<string, WhatsAppMessage[]>();
+        ((recentResult.data ?? []) as WhatsAppMessage[]).forEach(msg => {
+            const cid = getContactId(msg);
+            if (!cid) return;
+            if (!recentByContact.has(cid)) recentByContact.set(cid, []);
+            recentByContact.get(cid)!.push(msg);
         });
 
-        const sortedContacts = Array.from(contactMap.values()).sort(
-            (a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()
-        );
-
-        setContacts(sortedContacts);
+        const rows = (rpcResult.data ?? []) as WhatsAppMessage[];
+        setContacts(buildContacts(rows, ebpMap, recentByContact));
+        setHasMore(rows.length === CONTACTS_PAGE_SIZE);
+        setContactPage(0);
         setLoading(false);
-    }, []);
+    }, [config.tableMessages, config.tableContacts, buildContacts]);
+
+    const loadMoreContacts = useCallback(async () => {
+        setLoadingMore(true);
+        const nextPage = contactPage + 1;
+
+        const [rpcResult, ebpResult] = await Promise.all([
+            supabase.rpc('get_last_messages_per_contact', {
+                p_table: config.tableMessages,
+                page_limit: CONTACTS_PAGE_SIZE,
+                page_offset: nextPage * CONTACTS_PAGE_SIZE,
+            }),
+            supabase.from(config.tableContacts).select('*'),
+        ]);
+
+        const ebpMap = new Map<string, ContactEbp>();
+        if (ebpResult.data) {
+            (ebpResult.data as ContactEbp[]).forEach(c => ebpMap.set(String(c.id), c));
+        }
+
+        const rows = (rpcResult.data ?? []) as WhatsAppMessage[];
+        // No need for unread counts on older contacts — they're not active
+        const newContacts = buildContacts(rows, ebpMap, new Map());
+        setContacts(prev => [...prev, ...newContacts]);
+        setHasMore(rows.length === CONTACTS_PAGE_SIZE);
+        setContactPage(nextPage);
+        setLoadingMore(false);
+    }, [contactPage, config.tableMessages, config.tableContacts, buildContacts]);
 
     // When a chat is opened: immediately record the current time as lastReadAt for
     // that contact, zero out their badge in the sidebar, and persist to localStorage.
@@ -532,97 +545,114 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                             No conversations match your search
                         </div>
                     ) : (
-                        filteredContacts.map((contact) => {
-                            const color = getAvatarColor(contact.id);
-                            return (
-                                <button
-                                    key={contact.id}
-                                    onClick={() => onSelectChat(contact.id)}
-                                    className="mx-2 my-1 p-2.5 sm:p-3 flex items-center gap-3 transition-all cursor-pointer rounded-xl select-none active:scale-[0.98] active:opacity-80"
-                                    style={{
-                                        width: 'calc(100% - 1rem)',
-                                        border: selectedChat === contact.id
-                                            ? `1px solid ${config.colorPrimary}50`
-                                            : contact.unreadCount > 0
-                                                ? `1px solid ${config.colorAccent}50`
-                                                : `1px solid ${config.colorAccent}25`,
-                                        backgroundColor: selectedChat === contact.id
-                                            ? `${config.colorPrimary}18`
-                                            : contact.unreadCount > 0
-                                                ? `${config.colorAccent}14`
-                                                : '#f8fafc',
-                                    }}
-                                >
-                                    {/* Avatar */}
-                                    <div className="relative flex-shrink-0">
-                                        <div
-                                            className="w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-white font-semibold text-sm sm:text-base shadow-sm"
-                                            style={{
-                                                background: `linear-gradient(135deg, ${color.from}, ${color.to})`
-                                            }}
-                                        >
-                                            {contact.name?.[0]?.toUpperCase() || <User size={18} />}
-                                        </div>
-                                        {contact.unreadCount > 0 && selectedChat !== contact.id && (
-                                            <div className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-white text-[10px] font-bold flex items-center justify-center shadow-sm z-10" style={{ backgroundColor: 'var(--color-accent)' }}>
-                                                {contact.unreadCount}
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Info */}
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center justify-between gap-1 mb-0.5">
-                                            <span className="font-semibold text-slate-900 truncate text-sm sm:text-base text-left">
-                                                {contact.name || `+${contact.id}`}
-                                            </span>
-                                            <span className={`text-[9px] sm:text-[10px] ml-1.5 flex-shrink-0 ${contact.unreadCount > 0 && selectedChat !== contact.id ? 'text-[var(--color-primary)] font-bold' : 'text-slate-400'}`}>
-                                                {formatTime(contact.lastMessageTime)}
-                                            </span>
-                                        </div>
-                                        <div className="flex items-center justify-between gap-2">
-                                            <p className={`text-xs truncate flex-1 text-left flex items-center gap-1 ${contact.unreadCount > 0 && selectedChat !== contact.id ? 'text-slate-900 font-medium' : 'text-slate-500'}`}>
-                                                {contact.lastMessageIsOutgoing && contact.lastMessage && (
-                                                    <CheckCheck size={12} className="flex-shrink-0" style={{ color: 'var(--color-primary)', opacity: 0.7 }} />
-                                                )}
-                                                <span className={`truncate ${!contact.lastMessage ? 'italic text-slate-300' : ''}`}>
-                                                    {contact.lastMessage || 'No messages yet'}
-                                                </span>
-                                            </p>
-                                        </div>
-                                        {/* Tags Display + Assign Button */}
-                                        <div className="flex items-center gap-1 mt-1.5">
-                                            <div className="flex flex-wrap gap-1 flex-1">
-                                                {contact.tags && contact.tags.length > 0 && contact.tags.map(tagId => {
-                                                    const tag = getTagById(tagId);
-                                                    if (!tag) return null;
-                                                    return (
-                                                        <span
-                                                            key={tag.id}
-                                                            className="px-1.5 py-0.5 rounded text-[8px] sm:text-[9px] font-medium leading-none"
-                                                            style={{
-                                                                backgroundColor: `${tag['tag hex']}15`,
-                                                                color: tag['tag hex'] || '#ef4444',
-                                                                border: `1px solid ${tag['tag hex']}30`
-                                                            }}
-                                                        >
-                                                            {tag['tag name']}
-                                                        </span>
-                                                    );
-                                                })}
-                                            </div>
-                                            <button
-                                                onClick={(e) => openTagManagerForContact(e, contact.id, contact.tags || [])}
-                                                className="p-0.5 rounded text-slate-300 hover:text-[var(--color-primary)] transition-colors flex-shrink-0"
-                                                title="Assign tags"
+                        <>
+                            {filteredContacts.map((contact) => {
+                                const color = getAvatarColor(contact.id);
+                                return (
+                                    <button
+                                        key={contact.id}
+                                        onClick={() => onSelectChat(contact.id)}
+                                        className="mx-2 my-1 p-2.5 sm:p-3 flex items-center gap-3 transition-all cursor-pointer rounded-xl select-none active:scale-[0.98] active:opacity-80"
+                                        style={{
+                                            width: 'calc(100% - 1rem)',
+                                            border: selectedChat === contact.id
+                                                ? `1px solid ${config.colorPrimary}50`
+                                                : contact.unreadCount > 0
+                                                    ? `1px solid ${config.colorAccent}50`
+                                                    : `1px solid ${config.colorAccent}25`,
+                                            backgroundColor: selectedChat === contact.id
+                                                ? `${config.colorPrimary}18`
+                                                : contact.unreadCount > 0
+                                                    ? `${config.colorAccent}14`
+                                                    : '#f8fafc',
+                                        }}
+                                    >
+                                        {/* Avatar */}
+                                        <div className="relative flex-shrink-0">
+                                            <div
+                                                className="w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-white font-semibold text-sm sm:text-base shadow-sm"
+                                                style={{ background: `linear-gradient(135deg, ${color.from}, ${color.to})` }}
                                             >
-                                                <TagIcon size={12} />
-                                            </button>
+                                                {contact.name?.[0]?.toUpperCase() || <User size={18} />}
+                                            </div>
+                                            {contact.unreadCount > 0 && selectedChat !== contact.id && (
+                                                <div className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-white text-[10px] font-bold flex items-center justify-center shadow-sm z-10" style={{ backgroundColor: 'var(--color-accent)' }}>
+                                                    {contact.unreadCount}
+                                                </div>
+                                            )}
                                         </div>
-                                    </div>
-                                </button>
-                            );
-                        })
+
+                                        {/* Info */}
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center justify-between gap-1 mb-0.5">
+                                                <span className="font-semibold text-slate-900 truncate text-sm sm:text-base text-left">
+                                                    {contact.name || `+${contact.id}`}
+                                                </span>
+                                                <span className={`text-[9px] sm:text-[10px] ml-1.5 flex-shrink-0 ${contact.unreadCount > 0 && selectedChat !== contact.id ? 'text-[var(--color-primary)] font-bold' : 'text-slate-400'}`}>
+                                                    {formatTime(contact.lastMessageTime)}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center justify-between gap-2">
+                                                <p className={`text-xs truncate flex-1 text-left flex items-center gap-1 ${contact.unreadCount > 0 && selectedChat !== contact.id ? 'text-slate-900 font-medium' : 'text-slate-500'}`}>
+                                                    {contact.lastMessageIsOutgoing && contact.lastMessage && (
+                                                        <CheckCheck size={12} className="flex-shrink-0" style={{ color: 'var(--color-primary)', opacity: 0.7 }} />
+                                                    )}
+                                                    <span className={`truncate ${!contact.lastMessage ? 'italic text-slate-300' : ''}`}>
+                                                        {contact.lastMessage || 'No messages yet'}
+                                                    </span>
+                                                </p>
+                                            </div>
+                                            {/* Tags Display + Assign Button */}
+                                            <div className="flex items-center gap-1 mt-1.5">
+                                                <div className="flex flex-wrap gap-1 flex-1">
+                                                    {contact.tags && contact.tags.length > 0 && contact.tags.map(tagId => {
+                                                        const tag = getTagById(tagId);
+                                                        if (!tag) return null;
+                                                        return (
+                                                            <span
+                                                                key={tag.id}
+                                                                className="px-1.5 py-0.5 rounded text-[8px] sm:text-[9px] font-medium leading-none"
+                                                                style={{
+                                                                    backgroundColor: `${tag['tag hex']}15`,
+                                                                    color: tag['tag hex'] || '#ef4444',
+                                                                    border: `1px solid ${tag['tag hex']}30`
+                                                                }}
+                                                            >
+                                                                {tag['tag name']}
+                                                            </span>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <button
+                                                    onClick={(e) => openTagManagerForContact(e, contact.id, contact.tags || [])}
+                                                    className="p-0.5 rounded text-slate-300 hover:text-[var(--color-primary)] transition-colors flex-shrink-0"
+                                                    title="Assign tags"
+                                                >
+                                                    <TagIcon size={12} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                            {/* Load more */}
+                            {hasMore && !searchQuery && !showUnreadOnly && !showAiOffOnly && !selectedTagFilter && (
+                                <div className="px-2 py-3">
+                                    <button
+                                        onClick={loadMoreContacts}
+                                        disabled={loadingMore}
+                                        className="w-full py-2 rounded-xl text-xs font-semibold border transition-all"
+                                        style={{
+                                            borderColor: `${config.colorAccent}30`,
+                                            color: loadingMore ? '#94a3b8' : config.colorAccent,
+                                            backgroundColor: `${config.colorAccent}08`,
+                                        }}
+                                    >
+                                        {loadingMore ? 'Loading…' : 'Load more'}
+                                    </button>
+                                </div>
+                            )}
+                        </>
                     )}
                 </PullToRefresh>
 
