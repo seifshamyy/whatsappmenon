@@ -107,9 +107,8 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
     const fetchContacts = useCallback(async () => {
         const PAGE_SIZE = 1000;
 
-        // Fetch recent messages (for previews + unread counts) AND all contacts in parallel.
-        // Contacts are fetched from contacts.ebp — this is the source of truth for WHO exists.
-        // Messages only drive previews; contacts not in the recent window still appear.
+        // Phase 1: recent messages (unread counts + previews for active contacts)
+        // + full contacts list in parallel.
         const [page1, page2, ebpResult] = await Promise.all([
             supabase
                 .from(config.tableMessages)
@@ -145,9 +144,31 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
             msgsByContact.get(contactId)!.push(msg);
         });
 
+        // Phase 2: for contacts not covered by the recent window, fetch their
+        // last message individually. These are small limit-1 queries fired in parallel.
+        const staleIds = Array.from(ebpMap.keys()).filter(id => !msgsByContact.has(id));
+        if (staleIds.length > 0) {
+            const staleResults = await Promise.allSettled(
+                staleIds.map(id =>
+                    supabase
+                        .from(config.tableMessages)
+                        .select('id, from, to, text, type, created_at')
+                        .or(`from.eq.${id},to.eq.${id}`)
+                        .order('created_at', { ascending: false })
+                        .limit(1)
+                )
+            );
+            staleResults.forEach((result, i) => {
+                if (result.status === 'fulfilled' && result.value.data?.length) {
+                    const msg = result.value.data[0] as WhatsAppMessage;
+                    msgsByContact.set(staleIds[i], [msg]);
+                }
+            });
+        }
+
         const contactMap = new Map<string, SidebarContact>();
 
-        // 1. Seed every known contact from the contacts table so no-one is hidden
+        // Seed every contact from the contacts table
         ebpMap.forEach((ebpContact, contactId) => {
             contactMap.set(contactId, {
                 id: contactId,
@@ -161,9 +182,8 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
             });
         });
 
-        // 2. Overlay recent message data (preview, time, unread) for active contacts
+        // Overlay message data for all contacts that have messages
         msgsByContact.forEach((contactMsgs, contactId) => {
-            // msgs are descending — first is newest
             const newest = contactMsgs[0];
             const ebpContact = ebpMap.get(contactId);
 
@@ -191,7 +211,6 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
             });
         });
 
-        // Sort by last message time — contacts with no messages sink to the bottom
         const sortedContacts = Array.from(contactMap.values()).sort(
             (a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime()
         );
