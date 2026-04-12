@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X, ChevronLeft, Search, User, Check, CheckCheck, AlertCircle, Loader2, Zap } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useConfig } from '../context/ConfigContext';
@@ -239,7 +240,7 @@ export const BroadcastModal = ({ isOpen, onClose }: BroadcastModalProps) => {
 
     const isSending = step === 'progress' && !isDone;
 
-    return (
+    return createPortal(
         <div
             className="fixed inset-0 z-50"
             style={{
@@ -682,5 +683,6 @@ export const BroadcastModal = ({ isOpen, onClose }: BroadcastModalProps) => {
             </div>
             </div>
         </div>
+        , document.body
     );
 };
