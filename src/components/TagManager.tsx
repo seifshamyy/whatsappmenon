@@ -22,6 +22,7 @@ export const TagManager = ({ isOpen, onClose, onTagsChanged, contactId, contactT
     const [tagName, setTagName] = useState('');
     const [tagHex, setTagHex] = useState(TAG_COLORS[0].hex);
     const [loading, setLoading] = useState(false);
+    const [fetchError, setFetchError] = useState<string | null>(null);
     const [localContactTags, setLocalContactTags] = useState<number[]>(contactTags);
 
     useEffect(() => {
@@ -32,8 +33,14 @@ export const TagManager = ({ isOpen, onClose, onTagsChanged, contactId, contactT
     }, [isOpen, contactTags]);
 
     const fetchTags = async () => {
-        const { data } = await supabase.from(config.tableTags).select('*').order('id');
-        if (data) setTags(data as Tag[]);
+        const { data, error } = await supabase.from(config.tableTags).select('*').order('id');
+        if (error) {
+            console.error('[Tags] fetchTags failed:', error);
+            setFetchError(error.message);
+        } else {
+            setFetchError(null);
+            if (data) setTags(data as Tag[]);
+        }
     };
 
     const createTag = async () => {
@@ -78,10 +85,11 @@ export const TagManager = ({ isOpen, onClose, onTagsChanged, contactId, contactT
 
         setLocalContactTags(newTags);
 
-        await supabase
+        const { error } = await supabase
             .from(config.tableContacts)
             .update({ tags: newTags })
-            .eq('id', contactId);
+            .eq('id', Number(contactId));
+        if (error) console.error('[Tags] toggleTag failed:', error);
 
         onTagsChanged();
         setLoading(false);
@@ -210,7 +218,14 @@ export const TagManager = ({ isOpen, onClose, onTagsChanged, contactId, contactT
                     {tags.length === 0 && !creating && (
                         <div className="text-center py-10 px-4">
                             <div className="text-4xl mb-3">🏷️</div>
-                            <p className="text-slate-400 text-sm">No tags found. Create one to organize your leads.</p>
+                            {fetchError ? (
+                                <>
+                                    <p className="text-red-500 text-sm font-semibold mb-1">Failed to load tags</p>
+                                    <p className="text-slate-400 text-xs font-mono break-all">{fetchError}</p>
+                                </>
+                            ) : (
+                                <p className="text-slate-400 text-sm">No tags found. Create one to organize your leads.</p>
+                            )}
                         </div>
                     )}
 

@@ -103,13 +103,15 @@ export const BroadcastModal = ({ isOpen, onClose }: BroadcastModalProps) => {
                     .select('from, to, created_at, text, type')
                     .gte('created_at', since)
                     .order('created_at', { ascending: false }),
-                supabase.from(config.tableContacts).select('id, name_WA'),
+                supabase.from(config.tableContacts).select('*'),
             ]);
 
-            const nameMap = new Map<string, string>();
+            if (ebpResult.error) console.error('[Broadcast] contacts fetch failed:', ebpResult.error);
+
+            const nameMap = new Map<string, string | null>();
             if (ebpResult.data) {
-                (ebpResult.data as { id: number; name_WA: string | null }[])
-                    .forEach(c => nameMap.set(String(c.id), c.name_WA || ''));
+                (ebpResult.data as { id: number | string; name_WA: string | null }[])
+                    .forEach(c => nameMap.set(String(c.id), c.name_WA ?? null));
             }
 
             const seen = new Map<string, BroadcastContact>();
@@ -121,7 +123,7 @@ export const BroadcastModal = ({ isOpen, onClose }: BroadcastModalProps) => {
                 if (msRemaining <= 0) return;
                 seen.set(contactId, {
                     id: contactId,
-                    name: nameMap.get(contactId) || null,
+                    name: nameMap.has(contactId) ? (nameMap.get(contactId) ?? null) : null,
                     lastMessage: msg.text || (msg.type === 'audio' ? '🎤 Voice' : '📷 Media'),
                     msRemaining,
                 });

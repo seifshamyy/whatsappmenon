@@ -95,7 +95,8 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
 
     // Fetch tags
     const fetchTags = useCallback(async () => {
-        const { data } = await supabase.from(config.tableTags).select('*');
+        const { data, error } = await supabase.from(config.tableTags).select('*');
+        if (error) console.error('[Tags] fetchTags failed:', error);
         if (data) setAllTags(data as Tag[]);
     }, [config.tableTags]);
 
