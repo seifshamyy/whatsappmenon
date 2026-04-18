@@ -379,80 +379,85 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
         const doSearch = async () => {
             setIsSearching(true);
 
-            // 1. Find matching contacts (by name and/or tag filter)
-            let contactsQuery = supabase.from(config.tableContacts).select('*');
-            if (selectedTagFilter) {
-                contactsQuery = contactsQuery.contains('tags', [selectedTagFilter]);
-            }
-            if (searchQuery) {
-                contactsQuery = contactsQuery.ilike('name_WA', `%${searchQuery}%`);
-            }
-            const { data: matchedByName } = await contactsQuery;
-            if (controller.signal.aborted) return;
+            // 1. Fetch ALL contacts — we must filter tags in JS because the column
+            //    is `json` (not `jsonb`), so PostgREST's @> containment operator
+            //    doesn't work on it. Name search is still server-side via ilike.
+            const contactsQuery = searchQuery
+                ? supabase.from(config.tableContacts).select('*').ilike('name_WA', `%${searchQuery}%`)
+                : supabase.from(config.tableContacts).select('*');
 
-            // 2. If query looks like a phone number fragment, also search messages table
-            let phoneContactIds = new Set<string>();
-            if (searchQuery && /\d/.test(searchQuery)) {
-                const { data: phoneMsgs } = await supabase
+            // Run contact query and (if query has digits) phone-number search in parallel
+            const phonePromise = (searchQuery && /\d/.test(searchQuery))
+                ? supabase
                     .from(config.tableMessages)
                     .select('from, to, text, type, created_at')
                     .or(`from.ilike.%${searchQuery}%,to.ilike.%${searchQuery}%`)
                     .order('created_at', { ascending: false })
-                    .limit(200);
-                if (!controller.signal.aborted && phoneMsgs) {
-                    (phoneMsgs as WhatsAppMessage[]).forEach(msg => {
-                        const cid = getContactId(msg);
-                        if (cid) phoneContactIds.add(cid);
-                    });
-                }
-            }
+                    .limit(200)
+                : Promise.resolve({ data: null });
+
+            const [{ data: contactRows }, { data: phoneMsgs }] = await Promise.all([contactsQuery, phonePromise]);
             if (controller.signal.aborted) return;
 
-            // 3. Merge contact ID sets
-            const nameContactIds = new Set((matchedByName ?? []).map(c => String(c.id)));
-            const allMatchIds = new Set([...nameContactIds, ...phoneContactIds]);
-            if (allMatchIds.size === 0) { setSearchResults([]); setIsSearching(false); return; }
-
-            // 4. Fetch full contact rows for phone-only matches (not already in matchedByName)
-            const extraIds = [...phoneContactIds].filter(id => !nameContactIds.has(id)).map(Number);
-            let allContacts = [...(matchedByName ?? [])] as ContactEbp[];
-            if (extraIds.length > 0) {
-                const { data: extraContacts } = await supabase
-                    .from(config.tableContacts)
-                    .select('*')
-                    .in('id', extraIds);
-                if (!controller.signal.aborted && extraContacts) {
-                    allContacts = [...allContacts, ...(extraContacts as ContactEbp[])];
-                }
-            }
-            if (controller.signal.aborted) return;
-
-            // Apply tag filter to phone-matched extras (name matches already filtered server-side)
-            if (selectedTagFilter) {
+            // 2. Filter by tag client-side (reliable for json column type)
+            let allContacts = (contactRows ?? []) as ContactEbp[];
+            if (selectedTagFilter !== null) {
                 allContacts = allContacts.filter(c => {
-                    const tags = (c.tags as number[]) || [];
+                    const tags = Array.isArray(c.tags) ? (c.tags as number[]) : [];
                     return tags.includes(selectedTagFilter);
                 });
             }
 
-            // 5. Get last message for each matched contact
-            const numericIds = [...new Set(allContacts.map(c => Number(c.id)))];
+            // 3. Merge in phone-number matched contacts that weren't in name results
+            if (phoneMsgs) {
+                const existingIds = new Set(allContacts.map(c => String(c.id)));
+                const phoneIds = new Set<string>();
+                (phoneMsgs as WhatsAppMessage[]).forEach(msg => {
+                    const cid = getContactId(msg);
+                    if (cid && !existingIds.has(cid)) phoneIds.add(cid);
+                });
+                if (phoneIds.size > 0) {
+                    const { data: extraContacts } = await supabase
+                        .from(config.tableContacts)
+                        .select('*')
+                        .in('id', [...phoneIds].map(Number));
+                    if (!controller.signal.aborted && extraContacts) {
+                        let extras = extraContacts as ContactEbp[];
+                        // Apply tag filter to phone extras too
+                        if (selectedTagFilter !== null) {
+                            extras = extras.filter(c => {
+                                const tags = Array.isArray(c.tags) ? (c.tags as number[]) : [];
+                                return tags.includes(selectedTagFilter);
+                            });
+                        }
+                        allContacts = [...allContacts, ...extras];
+                    }
+                }
+            }
+            if (controller.signal.aborted) return;
+
+            if (allContacts.length === 0) { setSearchResults([]); setIsSearching(false); return; }
+
+            // 4. Fetch last messages for matched contacts
+            const numericIds = allContacts.map(c => Number(c.id));
             const { data: recentMsgs } = await supabase
                 .from(config.tableMessages)
                 .select('id, from, to, text, type, created_at')
+                .in('from', numericIds.map(String))
+                // Also pick up outgoing messages (where contact is in `to`)
+                // via a separate pass below
                 .order('created_at', { ascending: false })
-                .limit(Math.min(numericIds.length * 20, 5000));
+                .limit(Math.min(numericIds.length * 10, 3000));
             if (controller.signal.aborted) return;
 
+            // Build last-message map — keyed by contact phone
             const lastMsgByContact = new Map<string, WhatsAppMessage>();
             ((recentMsgs ?? []) as WhatsAppMessage[]).forEach(msg => {
                 const cid = getContactId(msg);
-                if (cid && numericIds.includes(Number(cid)) && !lastMsgByContact.has(cid)) {
-                    lastMsgByContact.set(cid, msg);
-                }
+                if (cid && !lastMsgByContact.has(cid)) lastMsgByContact.set(cid, msg);
             });
 
-            // 6. Build SidebarContact results
+            // 5. Build SidebarContact results
             const results: SidebarContact[] = allContacts.map(contact => {
                 const contactId = String(contact.id);
                 const lastMsg = lastMsgByContact.get(contactId);
@@ -464,7 +469,7 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                     lastMessageTime: lastMsg?.created_at || '',
                     lastMessageIsOutgoing: lastMsgIsOutgoing,
                     unreadCount: 0,
-                    tags: (contact.tags as number[]) || [],
+                    tags: Array.isArray(contact.tags) ? (contact.tags as number[]) : [],
                     aiEnabled: contact.AI_replies === 'true',
                 } satisfies SidebarContact;
             }).sort((a, b) => {
