@@ -248,7 +248,9 @@ function HourlyChart({ raw }: { raw: unknown }) {
     const pts = entries.map((e, i) => {
         const d = new Date(e.hour);
         const h2 = (d.getUTCHours() + 2) % 24;
-        return { i, h2, count: Number(e.new_contacts) || 0, label: `${String(h2).padStart(2, '0')}:00` };
+        const ampm = h2 < 12 ? 'am' : 'pm';
+        const h12 = h2 % 12 === 0 ? 12 : h2 % 12;
+        return { i, h2, count: Number(e.new_contacts) || 0, label: `${h12}${ampm}` };
     });
 
     const maxVal = Math.max(...pts.map(p => p.count), 1);
