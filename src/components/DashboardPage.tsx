@@ -21,7 +21,7 @@ interface DailyAnalytics {
     top_ads: { data: TopAd[] } | null;
     message_trend_analysis: string | null;
     message_count: Record<string, number> | null;
-    messages_by_hour: unknown;
+    messages_by_hr: unknown;
     created_at: string;
 }
 
@@ -398,7 +398,7 @@ function DayDetail({ row, onBack }: { row: DailyAnalytics; onBack: () => void })
                 </div>
 
                 {/* Hourly curve */}
-                <HourlyChart raw={row.messages_by_hour} />
+                <HourlyChart raw={row.messages_by_hr} />
 
                 {/* Message depth distribution */}
                 {messageCounts && Object.keys(messageCounts).length > 0 && (
