@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, User, Tag as TagIcon, Bell, BellRing, MessageSquare, CheckCheck, Zap } from 'lucide-react';
+import { Search, User, Tag as TagIcon, Bell, BellRing, MessageSquare, CheckCheck, Zap, BarChart2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { WhatsAppMessage, ContactEbp, Tag, getContactId } from '../types';
 import { TagManager } from './TagManager';
 import { BroadcastModal } from './BroadcastModal';
+import { DashboardPage } from './DashboardPage';
 import { subscribeToPush, isPushSupported } from '../lib/pushNotifications';
 import { PullToRefresh } from './PullToRefresh';
 import { useConfig } from '../context/ConfigContext';
@@ -92,6 +93,7 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
     const [tagManagerContactId, setTagManagerContactId] = useState<string | undefined>();
     const [tagManagerContactTags, setTagManagerContactTags] = useState<number[]>([]);
     const [broadcastOpen, setBroadcastOpen] = useState(false);
+    const [dashboardOpen, setDashboardOpen] = useState(false);
 
     // Fetch tags
     const fetchTags = useCallback(async () => {
@@ -554,6 +556,13 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
                     </div>
                     <div className="flex items-center gap-1">
                         <button
+                            onClick={() => setDashboardOpen(true)}
+                            className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-[var(--color-primary)] transition-colors"
+                            title="Analytics dashboard"
+                        >
+                            <BarChart2 size={16} />
+                        </button>
+                        <button
                             onClick={() => setBroadcastOpen(true)}
                             className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-[var(--color-primary)] transition-colors"
                             title="Broadcast to 24h window"
@@ -819,6 +828,12 @@ export const ChatSidebar = ({ onSelectChat, selectedChat }: ChatSidebarProps) =>
             <BroadcastModal
                 isOpen={broadcastOpen}
                 onClose={() => setBroadcastOpen(false)}
+            />
+
+            {/* Dashboard */}
+            <DashboardPage
+                isOpen={dashboardOpen}
+                onClose={() => setDashboardOpen(false)}
             />
         </>
     );
